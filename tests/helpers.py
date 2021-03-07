@@ -11,13 +11,17 @@ class StatsdServer(asyncio.Protocol):
         self.connections_lost = 0
         self.message_counter = 0
 
-        self.buffer = io.BytesIO()
+        self.metrics = []
         self.running = asyncio.Event()
         self.client_connected = asyncio.Semaphore(value=0)
         self.message_received = asyncio.Semaphore(value=0)
         self.transports: list[asyncio.Transport] = []
 
+        self._buffer = io.BytesIO()
+
     async def run(self):
+        await self._reset()
+
         loop = asyncio.get_running_loop()
         self.service = await loop.create_server(lambda: self,
                                                 self.host,
@@ -61,6 +65,41 @@ class StatsdServer(asyncio.Protocol):
         self.connections_lost += 1
 
     def data_received(self, data: bytes):
-        self.buffer.write(data)
-        self.message_received.release()
-        self.message_counter += 1
+        self._buffer.write(data)
+        buf = self._buffer.getvalue()
+        if b'\n' in buf:
+            buf_complete = buf[-1] == ord('\n')
+            if not buf_complete:
+                offset = buf.rfind(b'\n')
+                self._buffer = io.BytesIO(buf[offset:])
+                buf = buf[:offset]
+            else:
+                self._buffer = io.BytesIO()
+                buf = buf[:-1]
+
+            for metric in buf.split(b'\n'):
+                self.metrics.append(metric)
+                self.message_received.release()
+                self.message_counter += 1
+
+    async def _reset(self):
+        self._buffer = io.BytesIO()
+        self.connections_made = 0
+        self.connections_lost = 0
+        self.message_counter = 0
+        self.metrics.clear()
+        for transport in self.transports:
+            transport.close()
+        self.transports.clear()
+
+        self.running.clear()
+        await self._drain_semaphore(self.client_connected)
+        await self._drain_semaphore(self.message_received)
+
+    @staticmethod
+    async def _drain_semaphore(semaphore: asyncio.Semaphore):
+        while not semaphore.locked():
+            try:
+                await asyncio.wait_for(semaphore.acquire(), 0.1)
+            except asyncio.TimeoutError:
+                break

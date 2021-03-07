@@ -7,10 +7,16 @@ from sprockets_statsd import statsd
 from tests import helpers
 
 
-class ProcessorTests(unittest.IsolatedAsyncioTestCase):
+class ProcessorTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         super().setUp()
         self.test_timeout = 5.0
+
+    async def wait_for(self, fut):
+        try:
+            await asyncio.wait_for(fut, timeout=self.test_timeout)
+        except asyncio.TimeoutError:
+            self.fail('future took too long to resolve')
 
     async def asyncSetUp(self):
         await super().asyncSetUp()
@@ -23,12 +29,8 @@ class ProcessorTests(unittest.IsolatedAsyncioTestCase):
         await self.statsd_server.wait_closed()
         await super().asyncTearDown()
 
-    async def wait_for(self, fut):
-        try:
-            await asyncio.wait_for(fut, timeout=self.test_timeout)
-        except asyncio.TimeoutError:
-            self.fail('future took too long to resolve')
 
+class ProcessorTests(ProcessorTestCase):
     async def test_that_processor_connects_and_disconnects(self):
         processor = statsd.Processor(host=self.statsd_server.host,
                                      port=self.statsd_server.port)
@@ -110,3 +112,72 @@ class ProcessorTests(unittest.IsolatedAsyncioTestCase):
         processor.port = self.statsd_server.port
 
         await self.wait_for(self.statsd_server.client_connected.acquire())
+
+
+class MetricProcessingTests(ProcessorTestCase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.processor = statsd.Processor(host=self.statsd_server.host,
+                                          port=self.statsd_server.port)
+        asyncio.create_task(self.processor.run())
+        await self.wait_for(self.statsd_server.client_connected.acquire())
+
+    async def asyncTearDown(self):
+        await self.wait_for(self.processor.stop())
+        await super().asyncTearDown()
+
+    def assert_metrics_equal(self, recvd: bytes, path, value, type_code):
+        recvd = recvd.decode('utf-8')
+        recvd_path, _, rest = recvd.partition(':')
+        recvd_value, _, recvd_code = rest.partition('|')
+        self.assertEqual(path, recvd_path, 'metric path mismatch')
+        self.assertEqual(recvd_value, str(value), 'metric value mismatch')
+        self.assertEqual(recvd_code, type_code, 'metric type mismatch')
+
+    async def test_sending_simple_counter(self):
+        self.processor.inject_metric('simple.counter', 1000, 'c')
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assert_metrics_equal(self.statsd_server.metrics[0],
+                                  'simple.counter', 1000, 'c')
+
+    async def test_adjusting_gauge(self):
+        self.processor.inject_metric('simple.gauge', 100, 'g')
+        self.processor.inject_metric('simple.gauge', -10, 'g')
+        self.processor.inject_metric('simple.gauge', '+10', 'g')
+        for _ in range(3):
+            await self.wait_for(self.statsd_server.message_received.acquire())
+
+        self.assert_metrics_equal(self.statsd_server.metrics[0],
+                                  'simple.gauge', '100', 'g')
+        self.assert_metrics_equal(self.statsd_server.metrics[1],
+                                  'simple.gauge', '-10', 'g')
+        self.assert_metrics_equal(self.statsd_server.metrics[2],
+                                  'simple.gauge', '+10', 'g')
+
+    async def test_sending_timer(self):
+        secs = 12.34
+        self.processor.inject_metric('simple.timer', secs * 1000.0, 'ms')
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assert_metrics_equal(self.statsd_server.metrics[0],
+                                  'simple.timer', 12340.0, 'ms')
+
+    async def test_that_queued_metrics_are_drained(self):
+        # The easiest way to test that the internal metrics queue
+        # is drained when the processor is stopped is to monkey
+        # patch the "process metric" method to enqueue a few
+        # metrics and then set running to false.  It will exit
+        # the run loop and drain the queue.
+        real_process_metric = self.processor._process_metric
+
+        async def fake_process_metric():
+            if self.processor.running:
+                self.processor.inject_metric('counter', 1, 'c')
+                self.processor.inject_metric('counter', 2, 'c')
+                self.processor.inject_metric('counter', 3, 'c')
+                self.processor.running = False
+            return await real_process_metric()
+
+        self.processor._process_metric = fake_process_metric
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        await self.wait_for(self.statsd_server.message_received.acquire())

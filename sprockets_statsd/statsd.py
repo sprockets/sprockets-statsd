@@ -15,18 +15,26 @@ class Processor(asyncio.Protocol):
         self.running = False
         self.transport = None
 
+        self._queue = asyncio.Queue()
+
     async def run(self):
         self.running = True
         while self.running:
             try:
                 await self._connect_if_necessary()
-                await asyncio.sleep(0.1)
+                await self._process_metric()
             except asyncio.CancelledError:
                 self.logger.info('task cancelled, exiting')
                 break
 
         self.running = False
+        self.logger.info('loop finished with %d metrics in the queue',
+                         self._queue.qsize())
         if self.connected.is_set():
+            num_ready = self._queue.qsize()
+            self.logger.info('draining %d metrics', num_ready)
+            for _ in range(num_ready):
+                await self._process_metric()
             self.logger.debug('closing transport')
             self.transport.close()
 
@@ -34,12 +42,17 @@ class Processor(asyncio.Protocol):
             self.logger.debug('waiting on transport to close')
             await asyncio.sleep(0.1)
 
-        self.logger.info('processing is exiting')
+        self.logger.info('processor is exiting')
         self.closed.set()
 
     async def stop(self):
         self.running = False
         await self.closed.wait()
+
+    def inject_metric(self, path: str, value: typing.Union[float, int, str],
+                      type_code: str):
+        payload = f'{path}:{value}|{type_code}\n'
+        self._queue.put_nowait(payload.encode('utf-8'))
 
     def eof_received(self):
         self.logger.warning('received EOF from statsd server')
@@ -69,3 +82,12 @@ class Processor(asyncio.Protocol):
             except IOError as error:
                 self.logger.warning('connection to %s:%s failed: %s',
                                     self.host, self.port, error)
+
+    async def _process_metric(self):
+        try:
+            metric = await asyncio.wait_for(self._queue.get(), 0.1)
+        except asyncio.TimeoutError:
+            return  # nothing to do
+        else:
+            self.transport.write(metric)
+            self._queue.task_done()
