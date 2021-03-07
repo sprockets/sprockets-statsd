@@ -16,6 +16,7 @@ class Processor(asyncio.Protocol):
         self.transport = None
 
         self._queue = asyncio.Queue()
+        self._failed_sends = []
 
     async def run(self):
         self.running = True
@@ -84,10 +85,35 @@ class Processor(asyncio.Protocol):
                                     self.host, self.port, error)
 
     async def _process_metric(self):
-        try:
-            metric = await asyncio.wait_for(self._queue.get(), 0.1)
-        except asyncio.TimeoutError:
-            return  # nothing to do
+        processing_failed_send = False
+        if self._failed_sends:
+            self.logger.debug('using previous send attempt')
+            metric = self._failed_sends[0]
+            processing_failed_send = True
         else:
-            self.transport.write(metric)
-            self._queue.task_done()
+            try:
+                metric = await asyncio.wait_for(self._queue.get(), 0.1)
+                self.logger.debug('received %r from queue', metric)
+            except asyncio.TimeoutError:
+                return
+            else:
+                # Since we `await`d the state of the transport may have
+                # changed.  Sending on the closed transport won't return
+                # an error since the send is async.  We can catch the
+                # problem here though.
+                if self.transport.is_closing():
+                    self.logger.debug('preventing send on closed transport')
+                    self._failed_sends.append(metric)
+                    return
+
+        self.transport.write(metric)
+        if self.transport.is_closing():
+            # Writing to a transport does not raise exceptions, it
+            # will close the transport if a low-level error occurs.
+            self.logger.debug('transport closed by writing')
+        else:
+            self.logger.debug('sent %r to statsd', metric)
+            if processing_failed_send:
+                self._failed_sends.pop(0)
+            else:
+                self._queue.task_done()

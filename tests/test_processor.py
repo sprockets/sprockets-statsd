@@ -181,3 +181,32 @@ class MetricProcessingTests(ProcessorTestCase):
         await self.wait_for(self.statsd_server.message_received.acquire())
         await self.wait_for(self.statsd_server.message_received.acquire())
         await self.wait_for(self.statsd_server.message_received.acquire())
+
+    async def test_metrics_sent_while_disconnected_are_queued(self):
+        self.statsd_server.close()
+        await self.statsd_server.wait_closed()
+
+        for value in range(50):
+            self.processor.inject_metric('counter', value, 'c')
+
+        asyncio.create_task(self.statsd_server.run())
+        await self.wait_for(self.statsd_server.client_connected.acquire())
+        for value in range(50):
+            await self.wait_for(self.statsd_server.message_received.acquire())
+            self.assertEqual(f'counter:{value}|c'.encode(),
+                             self.statsd_server.metrics.pop(0))
+
+    async def test_socket_closure_while_processing_failed_event(self):
+        state = {'first_time': True}
+        real_process_metric = self.processor._process_metric
+
+        async def fake_process_metric():
+            if state['first_time']:
+                self.processor._failed_sends.append(b'counter:1|c\n')
+                self.processor.transport.close()
+                state['first_time'] = False
+            return await real_process_metric()
+
+        self.processor._process_metric = fake_process_metric
+
+        await self.wait_for(self.statsd_server.message_received.acquire())
