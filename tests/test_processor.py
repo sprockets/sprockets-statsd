@@ -71,7 +71,7 @@ class ProcessorTests(ProcessorTestCase):
         await self.wait_for(self.statsd_server.client_connected.acquire())
 
         task.cancel()
-        await self.wait_for(processor.closed.wait())
+        await self.wait_for(processor.stopped.wait())
 
     async def test_shutdown_when_disconnected(self):
         processor = statsd.Processor(host=self.statsd_server.host,
@@ -113,17 +113,22 @@ class ProcessorTests(ProcessorTestCase):
 
         await self.wait_for(self.statsd_server.client_connected.acquire())
 
+    async def test_that_stopping_when_not_running_is_safe(self):
+        processor = statsd.Processor(host=self.statsd_server.host,
+                                     port=self.statsd_server.port)
+        await self.wait_for(processor.stop())
 
-class MetricProcessingTests(ProcessorTestCase):
+
+class ConnectorTests(ProcessorTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
-        self.processor = statsd.Processor(host=self.statsd_server.host,
-                                          port=self.statsd_server.port)
-        asyncio.create_task(self.processor.run())
+        self.connector = statsd.Connector(self.statsd_server.host,
+                                          self.statsd_server.port)
+        await self.connector.start()
         await self.wait_for(self.statsd_server.client_connected.acquire())
 
     async def asyncTearDown(self):
-        await self.wait_for(self.processor.stop())
+        await self.wait_for(self.connector.stop())
         await super().asyncTearDown()
 
     def assert_metrics_equal(self, recvd: bytes, path, value, type_code):
@@ -135,15 +140,15 @@ class MetricProcessingTests(ProcessorTestCase):
         self.assertEqual(recvd_code, type_code, 'metric type mismatch')
 
     async def test_sending_simple_counter(self):
-        self.processor.inject_metric('simple.counter', 1000, 'c')
+        self.connector.inject_metric('simple.counter', 1000, 'c')
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assert_metrics_equal(self.statsd_server.metrics[0],
                                   'simple.counter', 1000, 'c')
 
     async def test_adjusting_gauge(self):
-        self.processor.inject_metric('simple.gauge', 100, 'g')
-        self.processor.inject_metric('simple.gauge', -10, 'g')
-        self.processor.inject_metric('simple.gauge', '+10', 'g')
+        self.connector.inject_metric('simple.gauge', 100, 'g')
+        self.connector.inject_metric('simple.gauge', -10, 'g')
+        self.connector.inject_metric('simple.gauge', '+10', 'g')
         for _ in range(3):
             await self.wait_for(self.statsd_server.message_received.acquire())
 
@@ -156,7 +161,7 @@ class MetricProcessingTests(ProcessorTestCase):
 
     async def test_sending_timer(self):
         secs = 12.34
-        self.processor.inject_metric('simple.timer', secs * 1000.0, 'ms')
+        self.connector.inject_metric('simple.timer', secs * 1000.0, 'ms')
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assert_metrics_equal(self.statsd_server.metrics[0],
                                   'simple.timer', 12340.0, 'ms')
@@ -165,19 +170,19 @@ class MetricProcessingTests(ProcessorTestCase):
         # The easiest way to test that the internal metrics queue
         # is drained when the processor is stopped is to monkey
         # patch the "process metric" method to enqueue a few
-        # metrics and then set running to false.  It will exit
+        # metrics and then terminate the processor.  It will exit
         # the run loop and drain the queue.
-        real_process_metric = self.processor._process_metric
+        real_process_metric = self.connector.processor._process_metric
 
         async def fake_process_metric():
-            if self.processor.running:
-                self.processor.inject_metric('counter', 1, 'c')
-                self.processor.inject_metric('counter', 2, 'c')
-                self.processor.inject_metric('counter', 3, 'c')
-                self.processor.running = False
+            if not self.connector.processor.should_terminate:
+                self.connector.inject_metric('counter', 1, 'c')
+                self.connector.inject_metric('counter', 2, 'c')
+                self.connector.inject_metric('counter', 3, 'c')
+                self.connector.processor.should_terminate = True
             return await real_process_metric()
 
-        self.processor._process_metric = fake_process_metric
+        self.connector.processor._process_metric = fake_process_metric
         await self.wait_for(self.statsd_server.message_received.acquire())
         await self.wait_for(self.statsd_server.message_received.acquire())
         await self.wait_for(self.statsd_server.message_received.acquire())
@@ -187,7 +192,7 @@ class MetricProcessingTests(ProcessorTestCase):
         await self.statsd_server.wait_closed()
 
         for value in range(50):
-            self.processor.inject_metric('counter', value, 'c')
+            self.connector.inject_metric('counter', value, 'c')
 
         asyncio.create_task(self.statsd_server.run())
         await self.wait_for(self.statsd_server.client_connected.acquire())
@@ -198,15 +203,15 @@ class MetricProcessingTests(ProcessorTestCase):
 
     async def test_socket_closure_while_processing_failed_event(self):
         state = {'first_time': True}
-        real_process_metric = self.processor._process_metric
+        real_process_metric = self.connector.processor._process_metric
 
         async def fake_process_metric():
             if state['first_time']:
-                self.processor._failed_sends.append(b'counter:1|c\n')
-                self.processor.transport.close()
+                self.connector.processor._failed_sends.append(b'counter:1|c\n')
+                self.connector.processor.transport.close()
                 state['first_time'] = False
             return await real_process_metric()
 
-        self.processor._process_metric = fake_process_metric
+        self.connector.processor._process_metric = fake_process_metric
 
         await self.wait_for(self.statsd_server.message_received.acquire())
