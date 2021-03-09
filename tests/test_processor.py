@@ -1,15 +1,21 @@
 import asyncio
 import time
-import unittest
+
+import asynctest
 
 from sprockets_statsd import statsd
 from tests import helpers
 
 
-class ProcessorTestCase(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        super().setUp()
+class ProcessorTestCase(asynctest.TestCase):
+    async def setUp(self):
         self.test_timeout = 5.0
+        super().setUp()
+        await self.asyncSetUp()
+
+    async def tearDown(self):
+        await self.asyncTearDown()
+        super().tearDown()
 
     async def wait_for(self, fut):
         try:
@@ -18,7 +24,6 @@ class ProcessorTestCase(unittest.IsolatedAsyncioTestCase):
             self.fail('future took too long to resolve')
 
     async def asyncSetUp(self):
-        await super().asyncSetUp()
         self.statsd_server = helpers.StatsdServer()
         self.statsd_task = asyncio.create_task(self.statsd_server.run())
         await self.statsd_server.wait_running()
@@ -26,7 +31,6 @@ class ProcessorTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         self.statsd_task.cancel()
         await self.statsd_server.wait_closed()
-        await super().asyncTearDown()
 
 
 class ProcessorTests(ProcessorTestCase):
