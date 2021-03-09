@@ -3,7 +3,6 @@ import time
 import unittest
 
 from sprockets_statsd import statsd
-
 from tests import helpers
 
 
@@ -117,6 +116,24 @@ class ProcessorTests(ProcessorTestCase):
         processor = statsd.Processor(host=self.statsd_server.host,
                                      port=self.statsd_server.port)
         await self.wait_for(processor.stop())
+
+    def test_that_processor_fails_when_host_is_none(self):
+        with self.assertRaises(RuntimeError) as context:
+            statsd.Processor(host=None, port=12345)
+        self.assertIn('host', str(context.exception))
+
+    def test_that_processor_fails_when_port_is_invalid(self):
+        with self.assertRaises(RuntimeError) as context:
+            statsd.Processor(host='localhost', port=None)
+        self.assertIn('port', str(context.exception))
+
+        with self.assertRaises(RuntimeError) as context:
+            statsd.Processor(host='localhost', port=0)
+        self.assertIn('port', str(context.exception))
+
+        with self.assertRaises(RuntimeError) as context:
+            statsd.Processor(host='localhost', port=-1)
+        self.assertIn('port', str(context.exception))
 
 
 class ConnectorTests(ProcessorTestCase):

@@ -1,8 +1,11 @@
 import asyncio
 import io
+import typing
 
 
 class StatsdServer(asyncio.Protocol):
+    metrics: typing.List[bytes]
+
     def __init__(self):
         self.service = None
         self.host = '127.0.0.1'

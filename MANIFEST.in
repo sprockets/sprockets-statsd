@@ -1,4 +1,6 @@
 graft docs
 graft tests
-include LICENSE
+
 include CHANGELOG.rst
+include example.py
+include LICENSE

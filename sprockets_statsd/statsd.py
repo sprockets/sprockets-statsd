@@ -34,8 +34,14 @@ class Connector:
         self._processor_task = None
 
     async def start(self):
-        """Start the processor in the background."""
+        """Start the processor in the background.
+
+        This is a *blocking* method and does not return until the
+        processor task is actually running.
+
+        """
         self._processor_task = asyncio.create_task(self.processor.run())
+        await self.processor.running.wait()
 
     async def stop(self):
         """Stop the background processor.
@@ -105,6 +111,13 @@ class Processor(asyncio.Protocol):
 
        Is the TCP connection currently connected?
 
+    .. attribute:: running
+       :type: asyncio.Event
+
+       Is the background task currently running?  This is the event that
+       :meth:`.run` sets when it starts and it remains set until the task
+       exits.
+
     .. attribute:: stopped
        :type: asyncio.Event
 
@@ -115,9 +128,15 @@ class Processor(asyncio.Protocol):
     """
     def __init__(self, *, host, port: int = 8125):
         super().__init__()
+        if not host:
+            raise RuntimeError('host must be set')
+        if not port or port < 1:
+            raise RuntimeError('port must be a positive integer')
+
         self.host = host
         self.port = port
 
+        self.running = asyncio.Event()
         self.stopped = asyncio.Event()
         self.stopped.set()
         self.connected = asyncio.Event()
@@ -130,6 +149,7 @@ class Processor(asyncio.Protocol):
 
     async def run(self):
         """Maintains the connection and processes metric payloads."""
+        self.running.set()
         self.stopped.clear()
         self.should_terminate = False
         while not self.should_terminate:
@@ -156,6 +176,7 @@ class Processor(asyncio.Protocol):
             await asyncio.sleep(0.1)
 
         self.logger.info('processor is exiting')
+        self.running.clear()
         self.stopped.set()
 
     async def stop(self):
