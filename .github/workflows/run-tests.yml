@@ -1,0 +1,45 @@
+name: Testing
+on:
+  push:
+    branches: ["*"]
+    tags-ignore: ["*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.7, 3.8, 3.9]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools
+          python -m pip install '.[dev]'
+          python -m pip install -e .
+      - name: Lint
+        run: |
+          flake8 sprockets_statsd tests
+      - name: Check format
+        run: |
+          yapf -dr sprockets_statsd tests
+      - name: Run tests
+        run: |
+          coverage run -m unittest
+          coverage report
+          coverage xml
+# TODO
+#      - name: Upload coverage
+#        uses: codecov/codecov-action@v1.0.2
+#        if: github.event_name == 'push' && github.repository == 'sprockets/sprockets-statsd' && github.branch == 'main'
+#        with:
+#          token: ${{ secrets.CODECOV_TOKEN }}
+#          file: build/coverage.xml
+#          flags: unittests
+#          fail_ci_if_error: true
