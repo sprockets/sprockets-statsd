@@ -95,6 +95,7 @@ class ProcessorTests(ProcessorTestCase):
 
         self.statsd_server.transports[0].close()
         await self.wait_for(self.statsd_server.client_connected.acquire())
+        await self.wait_for(processor.stop())
 
     async def test_connection_failures(self):
         processor = statsd.Processor(host=self.statsd_server.host,
@@ -115,6 +116,7 @@ class ProcessorTests(ProcessorTestCase):
         processor.port = self.statsd_server.port
 
         await self.wait_for(self.statsd_server.client_connected.acquire())
+        await self.wait_for(processor.stop())
 
     async def test_that_stopping_when_not_running_is_safe(self):
         processor = statsd.Processor(host=self.statsd_server.host,
