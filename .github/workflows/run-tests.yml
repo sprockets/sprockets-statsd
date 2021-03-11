@@ -34,6 +34,9 @@ jobs:
           coverage run -m unittest
           coverage report
           coverage xml
+      - name: Generate documentation
+        run: |
+          sphinx-build -b html -W --no-color docs build/sphinx/html
 # TODO
 #      - name: Upload coverage
 #        uses: codecov/codecov-action@v1.0.2
