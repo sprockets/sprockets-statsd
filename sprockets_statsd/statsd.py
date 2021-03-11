@@ -8,6 +8,8 @@ class Connector:
 
     :param host: statsd server to send metrics to
     :param port: TCP port that the server is listening on
+    :param kwargs: additional keyword parameters are passed
+        to the :class:`.Processor` initializer
 
     This class maintains a TCP connection to a statsd server and
     sends metric lines to it asynchronously.  You must call the
@@ -29,8 +31,8 @@ class Connector:
        sends the metric payloads.
 
     """
-    def __init__(self, host: str, port: int = 8125):
-        self.processor = Processor(host=host, port=port)
+    def __init__(self, host: str, port: int = 8125, **kwargs):
+        self.processor = Processor(host=host, port=port, **kwargs)
         self._processor_task = None
 
     async def start(self):
@@ -75,6 +77,10 @@ class Processor(asyncio.Protocol):
 
     :param host: statsd server to send metrics to
     :param port: TCP port that the server is listening on
+    :param reconnect_sleep: number of seconds to sleep after socket
+        error occurs when connecting
+    :param wait_timeout: number os seconds to wait for a message to
+        arrive on the queue
 
     This class implements :class:`~asyncio.Protocol` for the statsd
     TCP connection.  The :meth:`.run` method is run as a background
@@ -126,7 +132,12 @@ class Processor(asyncio.Protocol):
        until the task stops.
 
     """
-    def __init__(self, *, host, port: int = 8125):
+    def __init__(self,
+                 *,
+                 host,
+                 port: int = 8125,
+                 reconnect_sleep: float = 1.0,
+                 wait_timeout: float = 0.1):
         super().__init__()
         if not host:
             raise RuntimeError('host must be set')
@@ -135,6 +146,8 @@ class Processor(asyncio.Protocol):
 
         self.host = host
         self.port = port
+        self._reconnect_sleep = reconnect_sleep
+        self._wait_timeout = wait_timeout
 
         self.running = asyncio.Event()
         self.stopped = asyncio.Event()
@@ -205,9 +218,9 @@ class Processor(asyncio.Protocol):
         self.logger.warning('statsd server connection lost')
         self.connected.clear()
 
-    async def _connect_if_necessary(self, wait_time: float = 0.1):
+    async def _connect_if_necessary(self):
         try:
-            await asyncio.wait_for(self.connected.wait(), wait_time)
+            await asyncio.wait_for(self.connected.wait(), self._wait_timeout)
         except asyncio.TimeoutError:
             try:
                 self.logger.debug('starting connection to %s:%s', self.host,
@@ -219,12 +232,14 @@ class Processor(asyncio.Protocol):
             except IOError as error:
                 self.logger.warning('connection to %s:%s failed: %s',
                                     self.host, self.port, error)
+                await asyncio.sleep(self._reconnect_sleep)
 
     async def _process_metric(self):
         processing_failed_send = False
         if not self._failed_sends:
             try:
-                metric = await asyncio.wait_for(self.queue.get(), 0.1)
+                metric = await asyncio.wait_for(self.queue.get(),
+                                                self._wait_timeout)
                 self.logger.debug('received %r from queue', metric)
                 self.queue.task_done()
             except asyncio.TimeoutError:

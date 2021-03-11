@@ -115,6 +115,21 @@ class ApplicationTests(testing.AsyncTestCase):
         })
         self.io_loop.run_sync(app.stop_statsd)
 
+    def test_optional_parameters(self):
+        app = sprockets_statsd.mixins.Application(
+            statsd={
+                'host': 'localhost',
+                'port': '8125',
+                'reconnect_sleep': 0.5,
+                'wait_timeout': 0.25,
+            })
+        self.io_loop.run_sync(app.start_statsd)
+
+        processor = app.settings['statsd']['_connector'].processor
+        self.assertEqual(0.5, processor._reconnect_sleep)
+        self.assertEqual(0.25, processor._wait_timeout)
+        self.io_loop.run_sync(app.stop_statsd)
+
 
 class RequestHandlerTests(testing.AsyncHTTPTestCase):
     def setUp(self):

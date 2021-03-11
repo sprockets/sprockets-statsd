@@ -13,13 +13,11 @@ class Application(web.Application):
     This mix-in is configured by the ``statsd`` settings key.  The
     value should be a dictionary with the following keys.
 
-    +--------+---------------------------------------------+
-    | host   | the statsd host to send metrics to          |
-    +--------+---------------------------------------------+
-    | port   | TCP port number that statsd is listening on |
-    +--------+---------------------------------------------+
-    | prefix | segment to prefix to metrics                |
-    +--------+---------------------------------------------+
+    +-------------------+---------------------------------------------+
+    | host              | the statsd host to send metrics to          |
+    +-------------------+---------------------------------------------+
+    | port              | TCP port number that statsd is listening on |
+    +-------------------+---------------------------------------------+
 
     *host* defaults to the :envvar:`STATSD_HOST` environment variable.
     If this value is not set, then the statsd connector **WILL NOT**
@@ -29,9 +27,29 @@ class Application(web.Application):
     with a back up default of 8125 if the environment variable is not
     set.
 
+    The following keys MAY also be specified to fine tune the statsd
+    connection.
+
+    +-------------------+---------------------------------------------+
+    | prefix            | segment to prefix to metrics.               |
+    +-------------------+---------------------------------------------+
+    | reconnect_timeout | number of seconds to sleep after a statsd   |
+    |                   | connection attempt fails                    |
+    +-------------------+---------------------------------------------+
+    | wait_timeout      | number of seconds to wait for a metric to   |
+    |                   | arrive on the queue before verifying the    |
+    |                   | connection                                  |
+    +-------------------+---------------------------------------------+
+
     *prefix* defaults to ``applications.<service>.<environment>`` where
     *<service>* and *<environment>* are replaced with the keys from
     `settings` if they are present.
+
+    *reconnect_timeout* defaults to 1.0 seconds which limits the
+    aggressiveness of creating new TCP connections.
+
+    *wait_timeout* defaults to 0.1 seconds which ensures that the
+    processor quickly responds to connection faults.
 
     """
     def __init__(self, *args, **settings):
@@ -63,8 +81,15 @@ class Application(web.Application):
         """
         statsd_settings = self.settings['statsd']
         if statsd_settings.get('_connector') is None:
-            connector = statsd.Connector(host=statsd_settings['host'],
-                                         port=statsd_settings['port'])
+            kwargs = {
+                'host': statsd_settings['host'],
+                'port': statsd_settings['port'],
+            }
+            if 'reconnect_sleep' in statsd_settings:
+                kwargs['reconnect_sleep'] = statsd_settings['reconnect_sleep']
+            if 'wait_timeout' in statsd_settings:
+                kwargs['wait_timeout'] = statsd_settings['wait_timeout']
+            connector = statsd.Connector(**kwargs)
             await connector.start()
             self.settings['statsd']['_connector'] = connector
 
