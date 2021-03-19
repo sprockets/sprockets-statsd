@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 
 import asynctest
@@ -55,7 +56,7 @@ class ProcessorTests(ProcessorTestCase):
         self.statsd_server.close()
         await self.statsd_server.wait_closed()
         until = time.time() + self.test_timeout
-        while processor.connected.is_set():
+        while processor.connected:
             await asyncio.sleep(0.1)
             if time.time() >= until:
                 self.fail('processor never disconnected')
@@ -63,7 +64,7 @@ class ProcessorTests(ProcessorTestCase):
         # Start the server on the same port and let the client reconnect.
         self.statsd_task = asyncio.create_task(self.statsd_server.run())
         await self.wait_for(self.statsd_server.client_connected.acquire())
-        self.assertTrue(processor.connected.is_set())
+        self.assertTrue(processor.connected)
 
         await self.wait_for(processor.stop())
 
@@ -97,27 +98,6 @@ class ProcessorTests(ProcessorTestCase):
         await self.wait_for(self.statsd_server.client_connected.acquire())
         await self.wait_for(processor.stop())
 
-    async def test_connection_failures(self):
-        processor = statsd.Processor(host=self.statsd_server.host,
-                                     port=self.statsd_server.port)
-        asyncio.create_task(processor.run())
-        await self.wait_for(self.statsd_server.client_connected.acquire())
-
-        # Change the port and close the transport, this will cause the
-        # processor to reconnect to the new port and fail.
-        processor.port = 1
-        processor.transport.close()
-
-        # Wait for the processor to be disconnected, then change the
-        # port back and let the processor reconnect.
-        while processor.connected.is_set():
-            await asyncio.sleep(0.1)
-        await asyncio.sleep(0.2)
-        processor.port = self.statsd_server.port
-
-        await self.wait_for(self.statsd_server.client_connected.acquire())
-        await self.wait_for(processor.stop())
-
     async def test_that_stopping_when_not_running_is_safe(self):
         processor = statsd.Processor(host=self.statsd_server.host,
                                      port=self.statsd_server.port)
@@ -140,6 +120,92 @@ class ProcessorTests(ProcessorTestCase):
         with self.assertRaises(RuntimeError) as context:
             statsd.Processor(host='localhost', port=-1)
         self.assertIn('port', str(context.exception))
+
+    async def test_starting_and_stopping_without_connecting(self):
+        host, port = self.statsd_server.host, self.statsd_server.port
+        self.statsd_server.close()
+        await self.wait_for(self.statsd_server.wait_closed())
+        processor = statsd.Processor(host=host, port=port)
+        asyncio.create_task(processor.run())
+        await self.wait_for(processor.running.wait())
+        await processor.stop()
+
+    async def test_that_protocol_exceptions_are_logged(self):
+        processor = statsd.Processor(host=self.statsd_server.host,
+                                     port=self.statsd_server.port)
+        asyncio.create_task(processor.run())
+        await self.wait_for(processor.running.wait())
+
+        with self.assertLogs(processor.logger, level=logging.ERROR) as cm:
+            processor.queue.put_nowait('not-bytes')
+            while processor.queue.qsize() > 0:
+                await asyncio.sleep(0.1)
+
+        for record in cm.records:
+            if (record.exc_info is not None
+                    and record.funcName == '_process_metric'):
+                break
+        else:
+            self.fail('Expected _process_metric to log exception')
+
+        await processor.stop()
+
+
+class TCPProcessingTests(ProcessorTestCase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.processor = statsd.Processor(host=self.statsd_server.host,
+                                          port=self.statsd_server.port)
+        asyncio.create_task(self.processor.run())
+        await self.wait_for(self.statsd_server.client_connected.acquire())
+
+    async def asyncTearDown(self):
+        await self.processor.stop()
+        await super().asyncTearDown()
+
+    async def test_connection_failures(self):
+        # Change the port and close the transport, this will cause the
+        # processor to reconnect to the new port and fail.
+        self.processor.port = 1
+        self.processor.protocol.transport.close()
+
+        # Wait for the processor to be disconnected, then change the
+        # port back and let the processor reconnect.
+        while self.processor.connected:
+            await asyncio.sleep(0.1)
+        await asyncio.sleep(0.2)
+        self.processor.port = self.statsd_server.port
+
+        await self.wait_for(self.statsd_server.client_connected.acquire())
+
+    async def test_socket_closure_while_processing_failed_event(self):
+        state = {'first_time': True}
+        real_process_metric = self.processor._process_metric
+
+        async def fake_process_metric():
+            if state['first_time']:
+                self.processor.protocol.buffered_data = b'counter:1|c\n'
+                self.processor.protocol.transport.close()
+                state['first_time'] = False
+            return await real_process_metric()
+
+        self.processor._process_metric = fake_process_metric
+
+        await self.wait_for(self.statsd_server.message_received.acquire())
+
+    async def test_socket_closure_while_sending(self):
+        state = {'first_time': True}
+        real_transport_write = self.processor.protocol.transport.write
+
+        def fake_transport_write(buffer):
+            if state['first_time']:
+                self.processor.protocol.transport.close()
+                state['first_time'] = False
+            return real_transport_write(buffer)
+
+        self.processor.protocol.transport.write = fake_transport_write
+        self.processor.queue.put_nowait(b'counter:1|c')
+        await self.wait_for(self.statsd_server.message_received.acquire())
 
 
 class ConnectorTests(ProcessorTestCase):
@@ -223,18 +289,3 @@ class ConnectorTests(ProcessorTestCase):
             await self.wait_for(self.statsd_server.message_received.acquire())
             self.assertEqual(f'counter:{value}|c'.encode(),
                              self.statsd_server.metrics.pop(0))
-
-    async def test_socket_closure_while_processing_failed_event(self):
-        state = {'first_time': True}
-        real_process_metric = self.connector.processor._process_metric
-
-        async def fake_process_metric():
-            if state['first_time']:
-                self.connector.processor._failed_sends.append(b'counter:1|c\n')
-                self.connector.processor.transport.close()
-                state['first_time'] = False
-            return await real_process_metric()
-
-        self.connector.processor._process_metric = fake_process_metric
-
-        await self.wait_for(self.statsd_server.message_received.acquire())

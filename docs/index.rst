@@ -24,6 +24,9 @@ documentation for a description of the supported settings.
 Reference
 =========
 
+.. autoclass:: sprockets_statsd.statsd.Connector
+   :members:
+
 Mixin classes
 -------------
 .. autoclass:: sprockets_statsd.mixins.Application
@@ -34,10 +37,13 @@ Mixin classes
 
 Internals
 ---------
-.. autoclass:: sprockets_statsd.statsd.Connector
+.. autoclass:: sprockets_statsd.statsd.Processor
    :members:
 
-.. autoclass:: sprockets_statsd.statsd.Processor
+.. autoclass:: sprockets_statsd.statsd.StatsdProtocol
+   :members:
+
+.. autoclass:: sprockets_statsd.statsd.TCPProtocol
    :members:
 
 Release history

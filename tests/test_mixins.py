@@ -158,8 +158,12 @@ class RequestHandlerTests(testing.AsyncHTTPTestCase):
         timeout_remaining = testing.get_async_test_timeout()
         for _ in range(metric_count):
             start = time.time()
-            self.io_loop.run_sync(self.statsd_server.message_received.acquire,
-                                  timeout=timeout_remaining)
+            try:
+                self.io_loop.run_sync(
+                    self.statsd_server.message_received.acquire,
+                    timeout=timeout_remaining)
+            except TimeoutError:
+                self.fail()
             timeout_remaining -= (time.time() - start)
 
     def parse_metric(self, metric_line: bytes) -> ParsedMetric:

@@ -68,11 +68,104 @@ class Connector:
         internal queue for future processing.
 
         """
-        payload = f'{path}:{value}|{type_code}\n'
+        payload = f'{path}:{value}|{type_code}'
         self.processor.queue.put_nowait(payload.encode('utf-8'))
 
 
-class Processor(asyncio.Protocol):
+class StatsdProtocol:
+    """Common interface for backend protocols/transports.
+
+    UDP and TCP transports have different interfaces (sendto vs write)
+    so this class adapts them to a common protocol that our code
+    can depend on.
+
+    .. attribute:: buffered_data
+       :type: bytes
+
+       Bytes that are buffered due to low-level transport failures.
+       Since protocols & transports are created anew with each connect
+       attempt, the :class:`.Processor` instance ensures that data
+       buffered on a transport is copied over to the new transport
+       when creating a connection.
+
+    .. attribute:: connected
+       :type: asyncio.Event
+
+       Is the protocol currently connected?
+
+    """
+    logger: logging.Logger
+
+    def __init__(self):
+        self.buffered_data = b''
+        self.connected = asyncio.Event()
+        self.logger = logging.getLogger(__package__).getChild(
+            self.__class__.__name__)
+        self.transport = None
+
+    def send(self, metric: bytes) -> None:
+        """Send a metric payload over the transport."""
+        raise NotImplementedError()
+
+    async def shutdown(self) -> None:
+        """Shutdown the transport and wait for it to close."""
+        raise NotImplementedError()
+
+    def connection_made(self, transport: asyncio.Transport):
+        """Capture the new transport and set the connected event."""
+        server, port = transport.get_extra_info('peername')
+        self.logger.info('connected to statsd %s:%s', server, port)
+        self.transport = transport
+        self.connected.set()
+
+    def connection_lost(self, exc: typing.Optional[Exception]):
+        """Clear the connected event."""
+        self.logger.warning('statsd server connection lost: %s', exc)
+        self.connected.clear()
+
+
+class TCPProtocol(StatsdProtocol, asyncio.Protocol):
+    """StatsdProtocol implementation over a TCP/IP connection."""
+    transport: asyncio.WriteTransport
+
+    def eof_received(self):
+        self.logger.warning('received EOF from statsd server')
+        self.connected.clear()
+
+    def send(self, metric: bytes) -> None:
+        """Send `metric` to the server.
+
+        If sending the metric fails, it will be saved in
+        ``self.buffered_data``.  The processor will save and
+        restore the buffered data if it needs to create a
+        new protocol object.
+
+        """
+        if not self.buffered_data and not metric:
+            return
+
+        self.buffered_data = self.buffered_data + metric + b'\n'
+        while (self.transport is not None and self.connected.is_set()
+               and self.buffered_data):
+            line, maybe_nl, rest = self.buffered_data.partition(b'\n')
+            line += maybe_nl
+            self.transport.write(line)
+            if self.transport.is_closing():
+                self.logger.warning('transport closed during write')
+                break
+            self.buffered_data = rest
+
+    async def shutdown(self) -> None:
+        """Close the transport after flushing any outstanding data."""
+        self.logger.info('shutting down')
+        if self.connected.is_set():
+            self.send(b'')  # flush buffered data
+            self.transport.close()
+            while self.connected.is_set():
+                await asyncio.sleep(0.1)
+
+
+class Processor:
     """Maintains the statsd connection and sends metric payloads.
 
     :param host: statsd server to send metrics to
@@ -112,11 +205,6 @@ class Processor(asyncio.Protocol):
        Formatted metric payloads to send to the statsd server.  Enqueue
        payloads to send them to the server.
 
-    .. attribute:: connected
-       :type: asyncio.Event
-
-       Is the TCP connection currently connected?
-
     .. attribute:: running
        :type: asyncio.Event
 
@@ -132,6 +220,9 @@ class Processor(asyncio.Protocol):
        until the task stops.
 
     """
+
+    protocol: typing.Union[StatsdProtocol, None]
+
     def __init__(self,
                  *,
                  host,
@@ -141,8 +232,13 @@ class Processor(asyncio.Protocol):
         super().__init__()
         if not host:
             raise RuntimeError('host must be set')
-        if not port or port < 1:
-            raise RuntimeError('port must be a positive integer')
+        try:
+            port = int(port)
+            if not port or port < 1:
+                raise RuntimeError(
+                    f'port must be a positive integer: {port!r}')
+        except TypeError:
+            raise RuntimeError(f'port must be a positive integer: {port!r}')
 
         self.host = host
         self.port = port
@@ -152,13 +248,19 @@ class Processor(asyncio.Protocol):
         self.running = asyncio.Event()
         self.stopped = asyncio.Event()
         self.stopped.set()
-        self.connected = asyncio.Event()
         self.logger = logging.getLogger(__package__).getChild('Processor')
         self.should_terminate = False
-        self.transport = None
+        self.protocol = None
         self.queue = asyncio.Queue()
 
         self._failed_sends = []
+
+    @property
+    def connected(self) -> bool:
+        """Is the processor connected?"""
+        if self.protocol is None:
+            return False
+        return self.protocol.connected.is_set()
 
     async def run(self):
         """Maintains the connection and processes metric payloads."""
@@ -168,7 +270,7 @@ class Processor(asyncio.Protocol):
         while not self.should_terminate:
             try:
                 await self._connect_if_necessary()
-                if self.connected.is_set():
+                if self.connected:
                     await self._process_metric()
             except asyncio.CancelledError:
                 self.logger.info('task cancelled, exiting')
@@ -177,17 +279,14 @@ class Processor(asyncio.Protocol):
         self.should_terminate = True
         self.logger.info('loop finished with %d metrics in the queue',
                          self.queue.qsize())
-        if self.connected.is_set():
-            num_ready = self.queue.qsize()
+        if self.connected:
+            num_ready = max(self.queue.qsize(), 1)
             self.logger.info('draining %d metrics', num_ready)
             for _ in range(num_ready):
                 await self._process_metric()
             self.logger.debug('closing transport')
-            self.transport.close()
-
-        while self.connected.is_set():
-            self.logger.debug('waiting on transport to close')
-            await asyncio.sleep(0.1)
+        if self.protocol is not None:
+            await self.protocol.shutdown()
 
         self.logger.info('processor is exiting')
         self.running.clear()
@@ -204,66 +303,46 @@ class Processor(asyncio.Protocol):
         self.should_terminate = True
         await self.stopped.wait()
 
-    def eof_received(self):
-        self.logger.warning('received EOF from statsd server')
-        self.connected.clear()
-
-    def connection_made(self, transport: asyncio.Transport):
-        server, port = transport.get_extra_info('peername')
-        self.logger.info('connected to statsd %s:%s', server, port)
-        self.transport = transport
-        self.connected.set()
-
-    def connection_lost(self, exc: typing.Optional[Exception]):
-        self.logger.warning('statsd server connection lost')
-        self.connected.clear()
-
     async def _connect_if_necessary(self):
-        try:
-            await asyncio.wait_for(self.connected.wait(), self._wait_timeout)
-        except asyncio.TimeoutError:
+        if self.protocol is not None:
             try:
-                self.logger.debug('starting connection to %s:%s', self.host,
-                                  self.port)
-                await asyncio.get_running_loop().create_connection(
-                    protocol_factory=lambda: self,
+                await asyncio.wait_for(self.protocol.connected.wait(),
+                                       self._wait_timeout)
+            except asyncio.TimeoutError:
+                self.logger.debug('protocol is no longer connected')
+
+        if not self.connected:
+            try:
+                buffered_data = b''
+                if self.protocol is not None:
+                    buffered_data = self.protocol.buffered_data
+                loop = asyncio.get_running_loop()
+                transport, protocol = await loop.create_connection(
+                    protocol_factory=TCPProtocol,
                     host=self.host,
                     port=self.port)
+                self.protocol = typing.cast(TCPProtocol, protocol)
+                self.protocol.buffered_data = buffered_data
+                self.logger.info('connection established to %s',
+                                 transport.get_extra_info('peername'))
             except IOError as error:
                 self.logger.warning('connection to %s:%s failed: %s',
                                     self.host, self.port, error)
                 await asyncio.sleep(self._reconnect_sleep)
 
     async def _process_metric(self):
-        processing_failed_send = False
-        if not self._failed_sends:
-            try:
-                metric = await asyncio.wait_for(self.queue.get(),
-                                                self._wait_timeout)
-                self.logger.debug('received %r from queue', metric)
-                self.queue.task_done()
-            except asyncio.TimeoutError:
-                return
-            else:
-                # Since we `await`d the state of the transport may have
-                # changed.  Sending on the closed transport won't return
-                # an error since the send is async.  We can catch the
-                # problem here though.
-                if self.transport.is_closing():
-                    self.logger.debug('preventing send on closed transport')
-                    self._failed_sends.append(metric)
-                    return
-        else:
-            self.logger.debug('using previous send attempt')
-            metric = self._failed_sends[0]
-            processing_failed_send = True
+        try:
+            metric = await asyncio.wait_for(self.queue.get(),
+                                            self._wait_timeout)
+            self.logger.debug('received %r from queue', metric)
+            self.queue.task_done()
+        except asyncio.TimeoutError:
+            # we still want to invoke the protocol send in case
+            # it has queued metrics to send
+            metric = b''
 
-        self.transport.write(metric)
-        if not self.transport.is_closing():
-            self.logger.debug('sent %r to statsd', metric)
-            if processing_failed_send:
-                self._failed_sends.pop(0)
-        else:
-            # Writing to a transport does not raise exceptions, it
-            # will close the transport if a low-level error occurs.
-            self.logger.debug('transport closed by writing')
+        try:
+            self.protocol.send(metric)
+        except Exception as error:
+            self.logger.exception('exception occurred when sending metric: %s',
+                                  error)
