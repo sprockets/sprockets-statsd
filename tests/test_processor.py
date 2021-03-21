@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import socket
 import time
 
 import asynctest
@@ -9,6 +10,8 @@ from tests import helpers
 
 
 class ProcessorTestCase(asynctest.TestCase):
+    ip_protocol: int
+
     async def setUp(self):
         self.test_timeout = 5.0
         super().setUp()
@@ -25,16 +28,18 @@ class ProcessorTestCase(asynctest.TestCase):
             self.fail('future took too long to resolve')
 
     async def asyncSetUp(self):
-        self.statsd_server = helpers.StatsdServer()
+        self.statsd_server = helpers.StatsdServer(self.ip_protocol)
         self.statsd_task = asyncio.create_task(self.statsd_server.run())
         await self.statsd_server.wait_running()
 
     async def asyncTearDown(self):
-        self.statsd_task.cancel()
+        self.statsd_server.close()
         await self.statsd_server.wait_closed()
 
 
 class ProcessorTests(ProcessorTestCase):
+    ip_protocol = socket.IPPROTO_TCP
+
     async def test_that_processor_connects_and_disconnects(self):
         processor = statsd.Processor(host=self.statsd_server.host,
                                      port=self.statsd_server.port)
@@ -108,19 +113,6 @@ class ProcessorTests(ProcessorTestCase):
             statsd.Processor(host=None, port=12345)
         self.assertIn('host', str(context.exception))
 
-    def test_that_processor_fails_when_port_is_invalid(self):
-        with self.assertRaises(RuntimeError) as context:
-            statsd.Processor(host='localhost', port=None)
-        self.assertIn('port', str(context.exception))
-
-        with self.assertRaises(RuntimeError) as context:
-            statsd.Processor(host='localhost', port=0)
-        self.assertIn('port', str(context.exception))
-
-        with self.assertRaises(RuntimeError) as context:
-            statsd.Processor(host='localhost', port=-1)
-        self.assertIn('port', str(context.exception))
-
     async def test_starting_and_stopping_without_connecting(self):
         host, port = self.statsd_server.host, self.statsd_server.port
         self.statsd_server.close()
@@ -142,20 +134,22 @@ class ProcessorTests(ProcessorTestCase):
                 await asyncio.sleep(0.1)
 
         for record in cm.records:
-            if (record.exc_info is not None
-                    and record.funcName == '_process_metric'):
+            if record.exc_info is not None and record.funcName == 'run':
                 break
         else:
-            self.fail('Expected _process_metric to log exception')
+            self.fail('Expected run to log exception')
 
         await processor.stop()
 
 
 class TCPProcessingTests(ProcessorTestCase):
+    ip_protocol = socket.IPPROTO_TCP
+
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.processor = statsd.Processor(host=self.statsd_server.host,
-                                          port=self.statsd_server.port)
+                                          port=self.statsd_server.port,
+                                          reconnect_sleep=0.25)
         asyncio.create_task(self.processor.run())
         await self.wait_for(self.statsd_server.client_connected.acquire())
 
@@ -208,7 +202,57 @@ class TCPProcessingTests(ProcessorTestCase):
         await self.wait_for(self.statsd_server.message_received.acquire())
 
 
+class UDPProcessingTests(ProcessorTestCase):
+    ip_protocol = socket.IPPROTO_UDP
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.connector = statsd.Connector(host=self.statsd_server.host,
+                                          port=self.statsd_server.port,
+                                          ip_protocol=self.ip_protocol,
+                                          reconnect_sleep=0.25)
+        await self.connector.start()
+
+    async def asyncTearDown(self):
+        await self.connector.stop()
+        await super().asyncTearDown()
+
+    async def test_sending_metrics(self):
+        self.connector.inject_metric('counter', 1, 'c')
+        self.connector.inject_metric('timer', 1.0, 'ms')
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        await self.wait_for(self.statsd_server.message_received.acquire())
+
+        self.assertEqual(self.statsd_server.metrics[0], b'counter:1|c')
+        self.assertEqual(self.statsd_server.metrics[1], b'timer:1.0|ms')
+
+    async def test_that_client_sends_to_new_server(self):
+        self.statsd_server.close()
+        await self.statsd_server.wait_closed()
+
+        self.connector.inject_metric('should.be.lost', 1, 'c')
+        await asyncio.sleep(self.connector.processor._wait_timeout * 2)
+
+        self.statsd_task = asyncio.create_task(self.statsd_server.run())
+        await self.statsd_server.wait_running()
+
+        self.connector.inject_metric('should.be.recvd', 1, 'c')
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assertEqual(self.statsd_server.metrics[0], b'should.be.recvd:1|c')
+
+    async def test_that_client_handles_socket_closure(self):
+        self.connector.processor.protocol.transport.close()
+        await self.wait_for(
+            asyncio.sleep(self.connector.processor._reconnect_sleep))
+
+        self.connector.inject_metric('should.be.recvd', 1, 'c')
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assertEqual(self.statsd_server.metrics[0], b'should.be.recvd:1|c')
+
+
 class ConnectorTests(ProcessorTestCase):
+    ip_protocol = socket.IPPROTO_TCP
+
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.connector = statsd.Connector(self.statsd_server.host,
@@ -289,3 +333,29 @@ class ConnectorTests(ProcessorTestCase):
             await self.wait_for(self.statsd_server.message_received.acquire())
             self.assertEqual(f'counter:{value}|c'.encode(),
                              self.statsd_server.metrics.pop(0))
+
+
+class ConnectorOptionTests(ProcessorTestCase):
+    ip_protocol = socket.IPPROTO_TCP
+
+    def test_protocol_values(self):
+        connector = statsd.Connector(host=self.statsd_server.host,
+                                     port=self.statsd_server.port)
+        self.assertEqual(socket.IPPROTO_TCP, connector.processor._ip_protocol)
+
+        connector = statsd.Connector(host=self.statsd_server.host,
+                                     port=self.statsd_server.port,
+                                     ip_protocol=socket.IPPROTO_UDP)
+        self.assertEqual(socket.IPPROTO_UDP, connector.processor._ip_protocol)
+
+        with self.assertRaises(RuntimeError):
+            statsd.Connector(host=self.statsd_server.host,
+                             port=self.statsd_server.port,
+                             ip_protocol=socket.IPPROTO_GRE)
+
+    def test_invalid_port_values(self):
+        for port in {None, 0, -1, 'not-a-number'}:
+            with self.assertRaises(RuntimeError) as context:
+                statsd.Connector(host=self.statsd_server.host, port=port)
+            self.assertIn('port', str(context.exception))
+            self.assertIn(repr(port), str(context.exception))

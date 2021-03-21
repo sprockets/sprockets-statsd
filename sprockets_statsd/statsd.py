@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import socket
 import typing
 
 
@@ -7,11 +8,14 @@ class Connector:
     """Sends metrics to a statsd server.
 
     :param host: statsd server to send metrics to
-    :param port: TCP port that the server is listening on
+    :param port: socket port that the server is listening on
+    :keyword ip_protocol: IP protocol to use for the underlying
+        socket -- either :data:`socket.IPPROTO_TCP` for TCP or
+        :data:`socket.IPPROTO_UDP` for UDP sockets.
     :param kwargs: additional keyword parameters are passed
         to the :class:`.Processor` initializer
 
-    This class maintains a TCP connection to a statsd server and
+    This class maintains a connection to a statsd server and
     sends metric lines to it asynchronously.  You must call the
     :meth:`start` method when your application is starting.  It
     creates a :class:`~asyncio.Task` that manages the connection
@@ -165,6 +169,19 @@ class TCPProtocol(StatsdProtocol, asyncio.Protocol):
                 await asyncio.sleep(0.1)
 
 
+class UDPProtocol(StatsdProtocol, asyncio.DatagramProtocol):
+    """StatsdProtocol implementation over a UDP/IP connection."""
+    transport: asyncio.DatagramTransport
+
+    def send(self, metric: bytes) -> None:
+        if metric:
+            self.transport.sendto(metric)
+
+    async def shutdown(self) -> None:
+        self.logger.info('shutting down')
+        self.transport.close()
+
+
 class Processor:
     """Maintains the statsd connection and sends metric payloads.
 
@@ -222,12 +239,16 @@ class Processor:
     """
 
     protocol: typing.Union[StatsdProtocol, None]
+    _create_transport: typing.Callable[[], typing.Coroutine[
+        typing.Any, typing.Any, typing.Tuple[asyncio.BaseTransport,
+                                             StatsdProtocol]]]
 
     def __init__(self,
                  *,
                  host,
                  port: int = 8125,
                  reconnect_sleep: float = 1.0,
+                 ip_protocol: int = socket.IPPROTO_TCP,
                  wait_timeout: float = 0.1):
         super().__init__()
         if not host:
@@ -237,11 +258,21 @@ class Processor:
             if not port or port < 1:
                 raise RuntimeError(
                     f'port must be a positive integer: {port!r}')
-        except TypeError:
+        except (TypeError, ValueError):
             raise RuntimeError(f'port must be a positive integer: {port!r}')
+
+        transport_creators = {
+            socket.IPPROTO_TCP: self._create_tcp_transport,
+            socket.IPPROTO_UDP: self._create_udp_transport,
+        }
+        try:
+            self._create_transport = transport_creators[ip_protocol]
+        except KeyError:
+            raise RuntimeError(f'ip_protocol {ip_protocol} is not supported')
 
         self.host = host
         self.port = port
+        self._ip_protocol = ip_protocol
         self._reconnect_sleep = reconnect_sleep
         self._wait_timeout = wait_timeout
 
@@ -274,7 +305,10 @@ class Processor:
                     await self._process_metric()
             except asyncio.CancelledError:
                 self.logger.info('task cancelled, exiting')
-                break
+                self.should_terminate = True
+            except Exception as error:
+                self.logger.exception('unexpected error occurred: %s', error)
+                self.should_terminate = True
 
         self.should_terminate = True
         self.logger.info('loop finished with %d metrics in the queue',
@@ -303,6 +337,20 @@ class Processor:
         self.should_terminate = True
         await self.stopped.wait()
 
+    async def _create_tcp_transport(
+            self) -> typing.Tuple[asyncio.BaseTransport, StatsdProtocol]:
+        t, p = await asyncio.get_running_loop().create_connection(
+            protocol_factory=TCPProtocol, host=self.host, port=self.port)
+        return t, typing.cast(StatsdProtocol, p)
+
+    async def _create_udp_transport(
+            self) -> typing.Tuple[asyncio.BaseTransport, StatsdProtocol]:
+        t, p = await asyncio.get_running_loop().create_datagram_endpoint(
+            protocol_factory=UDPProtocol,
+            remote_addr=(self.host, self.port),
+            reuse_port=True)
+        return t, typing.cast(StatsdProtocol, p)
+
     async def _connect_if_necessary(self):
         if self.protocol is not None:
             try:
@@ -316,12 +364,7 @@ class Processor:
                 buffered_data = b''
                 if self.protocol is not None:
                     buffered_data = self.protocol.buffered_data
-                loop = asyncio.get_running_loop()
-                transport, protocol = await loop.create_connection(
-                    protocol_factory=TCPProtocol,
-                    host=self.host,
-                    port=self.port)
-                self.protocol = typing.cast(TCPProtocol, protocol)
+                transport, self.protocol = await self._create_transport()
                 self.protocol.buffered_data = buffered_data
                 self.logger.info('connection established to %s',
                                  transport.get_extra_info('peername'))
@@ -341,8 +384,4 @@ class Processor:
             # it has queued metrics to send
             metric = b''
 
-        try:
-            self.protocol.send(metric)
-        except Exception as error:
-            self.logger.exception('exception occurred when sending metric: %s',
-                                  error)
+        self.protocol.send(metric)

@@ -1,4 +1,40 @@
-Report metrics from your tornado_ web application to a statsd_ instance.
+Asynchronously send metrics to a statsd_ instance.
+
+This library provides connectors to send metrics to a statsd_ instance using either TCP or UDP.
+
+.. code-block:: python
+
+   import asyncio
+   import time
+
+   import sprockets_statsd.statsd
+
+   statsd = sprockets_statsd.statsd.Connector(
+      host=os.environ.get('STATSD_HOST', '127.0.0.1'))
+
+   async def do_stuff():
+      start = time.time()
+      response = make_some_http_call()
+      statsd.inject_metric(f'timers.http.something.{response.code}',
+                           (time.time() - start) * 1000.0, 'ms')
+
+   async def main():
+      await statsd.start()
+      try:
+         do_stuff()
+      finally:
+         await statsd.stop()
+
+The ``Connector`` instance maintains a resilient connection to the target StatsD instance, formats the metric data
+into payloads, and sends them to the StatsD target.  It defaults to using TCP as the transport but will use UDP if
+the ``ip_protocol`` keyword is set to ``socket.IPPROTO_UDP``.  The ``Connector.start`` method starts a background
+``asyncio.Task`` that is responsible for maintaining the connection.  The ``inject_metric`` method enqueues metric
+data to send and the task consumes the internal queue when it is connected.
+
+Tornado helpers
+===============
+The ``sprockets_statsd.mixins`` module contains mix-in classes that make reporting metrics from your tornado_ web
+application simple.
 
 .. code-block:: python
 
@@ -61,4 +97,3 @@ not connected to the server and will be sent in the order received when the task
 
 .. _statsd: https://github.com/statsd/statsd/
 .. _tornado: https://tornadoweb.org/
-

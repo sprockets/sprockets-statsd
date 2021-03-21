@@ -1,5 +1,6 @@
 import asyncio
 import os
+import socket
 import time
 import typing
 
@@ -133,7 +134,7 @@ class ApplicationTests(testing.AsyncTestCase):
 class RequestHandlerTests(testing.AsyncHTTPTestCase):
     def setUp(self):
         super().setUp()
-        self.statsd_server = helpers.StatsdServer()
+        self.statsd_server = helpers.StatsdServer(socket.IPPROTO_TCP)
         self.io_loop.spawn_callback(self.statsd_server.run)
         self.io_loop.run_sync(self.statsd_server.wait_running)
 
