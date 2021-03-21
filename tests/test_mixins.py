@@ -25,7 +25,18 @@ class Application(sprockets_statsd.mixins.Application, web.Application):
         super().__init__([web.url('/', Handler)], **settings)
 
 
-class ApplicationTests(testing.AsyncTestCase):
+class AsyncTestCaseWithTimeout(testing.AsyncTestCase):
+    def run_coroutine(self, coro):
+        loop: asyncio.AbstractEventLoop = self.io_loop.asyncio_loop
+        try:
+            loop.run_until_complete(
+                asyncio.wait_for(coro,
+                                 timeout=testing.get_async_test_timeout()))
+        except asyncio.TimeoutError:
+            self.fail(f'coroutine {coro} took too long to complete')
+
+
+class ApplicationTests(AsyncTestCaseWithTimeout):
     def setUp(self):
         super().setUp()
         self._environ = {}
@@ -40,6 +51,7 @@ class ApplicationTests(testing.AsyncTestCase):
     def test_statsd_setting_defaults(self):
         self.unsetenv('STATSD_HOST')
         self.unsetenv('STATSD_PORT')
+        self.unsetenv('STATSD_PROTOCOL')
 
         app = sprockets_statsd.mixins.Application()
         self.assertIn('statsd', app.settings)
@@ -47,15 +59,18 @@ class ApplicationTests(testing.AsyncTestCase):
                           'default host value should be None')
         self.assertEqual(8125, app.settings['statsd']['port'])
         self.assertEqual(None, app.settings['statsd']['prefix'])
+        self.assertEqual('tcp', app.settings['statsd']['protocol'])
 
     def test_that_statsd_settings_read_from_environment(self):
         self.setenv('STATSD_HOST', 'statsd')
         self.setenv('STATSD_PORT', '5218')
+        self.setenv('STATSD_PROTOCOL', 'udp')
 
         app = sprockets_statsd.mixins.Application()
         self.assertIn('statsd', app.settings)
         self.assertEqual('statsd', app.settings['statsd']['host'])
         self.assertEqual(5218, app.settings['statsd']['port'])
+        self.assertEqual('udp', app.settings['statsd']['protocol'])
 
     def test_prefix_when_only_service_is_set(self):
         app = sprockets_statsd.mixins.Application(service='blah')
@@ -77,20 +92,24 @@ class ApplicationTests(testing.AsyncTestCase):
     def test_overridden_settings(self):
         self.setenv('STATSD_HOST', 'statsd')
         self.setenv('STATSD_PORT', '9999')
-        app = sprockets_statsd.mixins.Application(statsd={
-            'host': 'statsd.example.com',
-            'port': 5218,
-            'prefix': 'myapp',
-        })
+        self.setenv('STATSD_PROTOCOL', 'tcp')
+        app = sprockets_statsd.mixins.Application(
+            statsd={
+                'host': 'statsd.example.com',
+                'port': 5218,
+                'prefix': 'myapp',
+                'protocol': 'udp',
+            })
         self.assertEqual('statsd.example.com', app.settings['statsd']['host'])
         self.assertEqual(5218, app.settings['statsd']['port'])
         self.assertEqual('myapp', app.settings['statsd']['prefix'])
+        self.assertEqual('udp', app.settings['statsd']['protocol'])
 
     def test_that_starting_without_configuration_fails(self):
         self.unsetenv('STATSD_HOST')
         app = sprockets_statsd.mixins.Application()
         with self.assertRaises(RuntimeError):
-            self.io_loop.run_sync(app.start_statsd)
+            self.run_coroutine(app.start_statsd())
 
     def test_starting_twice(self):
         app = sprockets_statsd.mixins.Application(statsd={
@@ -98,22 +117,22 @@ class ApplicationTests(testing.AsyncTestCase):
             'port': '8125',
         })
         try:
-            self.io_loop.run_sync(app.start_statsd)
+            self.run_coroutine(app.start_statsd())
             connector = app.statsd_connector
             self.assertIsNotNone(connector, 'statsd.Connector not created')
 
-            self.io_loop.run_sync(app.start_statsd)
+            self.run_coroutine(app.start_statsd())
             self.assertIs(app.statsd_connector, connector,
                           'statsd.Connector should not be recreated')
         finally:
-            self.io_loop.run_sync(app.stop_statsd)
+            self.run_coroutine(app.stop_statsd())
 
     def test_stopping_without_starting(self):
         app = sprockets_statsd.mixins.Application(statsd={
             'host': 'localhost',
             'port': '8125',
         })
-        self.io_loop.run_sync(app.stop_statsd)
+        self.run_coroutine(app.stop_statsd())
 
     def test_optional_parameters(self):
         app = sprockets_statsd.mixins.Application(
@@ -123,32 +142,60 @@ class ApplicationTests(testing.AsyncTestCase):
                 'reconnect_sleep': 0.5,
                 'wait_timeout': 0.25,
             })
-        self.io_loop.run_sync(app.start_statsd)
+        self.run_coroutine(app.start_statsd())
 
         processor = app.statsd_connector.processor
         self.assertEqual(0.5, processor._reconnect_sleep)
         self.assertEqual(0.25, processor._wait_timeout)
-        self.io_loop.run_sync(app.stop_statsd)
+        self.run_coroutine(app.stop_statsd())
+
+    def test_starting_with_invalid_protocol(self):
+        app = sprockets_statsd.mixins.Application(statsd={
+            'host': 'localhost',
+            'protocol': 'unknown'
+        })
+        with self.assertRaises(RuntimeError):
+            self.run_coroutine(app.start_statsd())
+
+    def test_that_protocol_strings_are_translated(self):
+        app = sprockets_statsd.mixins.Application(statsd={
+            'host': 'localhost',
+            'protocol': 'tcp',
+        })
+        self.run_coroutine(app.start_statsd())
+        self.assertEqual(socket.IPPROTO_TCP,
+                         app.statsd_connector.processor._ip_protocol)
+        self.run_coroutine(app.stop_statsd())
+
+        app = sprockets_statsd.mixins.Application(statsd={
+            'host': 'localhost',
+            'protocol': 'udp',
+        })
+        self.run_coroutine(app.start_statsd())
+        self.assertEqual(socket.IPPROTO_UDP,
+                         app.statsd_connector.processor._ip_protocol)
+        self.run_coroutine(app.stop_statsd())
 
 
-class RequestHandlerTests(testing.AsyncHTTPTestCase):
+class RequestHandlerTests(AsyncTestCaseWithTimeout, testing.AsyncHTTPTestCase):
     def setUp(self):
         super().setUp()
         self.statsd_server = helpers.StatsdServer(socket.IPPROTO_TCP)
         self.io_loop.spawn_callback(self.statsd_server.run)
-        self.io_loop.run_sync(self.statsd_server.wait_running)
+        self.run_coroutine(self.statsd_server.wait_running())
 
         self.app.settings['statsd'].update({
             'host': self.statsd_server.host,
             'port': self.statsd_server.port,
             'prefix': 'applications.service',
+            'protocol': 'tcp',
         })
-        self.io_loop.run_sync(self.app.start_statsd)
+        self.run_coroutine(self.app.start_statsd())
 
     def tearDown(self):
-        self.io_loop.run_sync(self.app.stop_statsd)
+        self.run_coroutine(self.app.stop_statsd())
         self.statsd_server.close()
-        self.io_loop.run_sync(self.statsd_server.wait_closed)
+        self.run_coroutine(self.statsd_server.wait_closed())
         super().tearDown()
 
     def get_app(self):

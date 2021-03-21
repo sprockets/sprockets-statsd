@@ -1,5 +1,6 @@
 import contextlib
 import os
+import socket
 import time
 
 from tornado import web
@@ -26,6 +27,8 @@ class Application(web.Application):
     +-------------------+---------------------------------------------+
     | prefix            | segment to prefix to metrics.               |
     +-------------------+---------------------------------------------+
+    | protocol          | "tcp" or "udp"                              |
+    +-------------------+---------------------------------------------+
     | reconnect_timeout | number of seconds to sleep after a statsd   |
     |                   | connection attempt fails                    |
     +-------------------+---------------------------------------------+
@@ -51,6 +54,10 @@ class Application(web.Application):
     This is a convenient way to maintain consistent metric paths when
     you are managing a larger number of services.
 
+    **protocol** defaults to the :envvar:`STATSD_PROTOCOL` environment
+    variable with a back default of "tcp" if the environment variable
+    is not set.
+
     **reconnect_timeout** defaults to 1.0 seconds which limits the
     aggressiveness of creating new TCP connections.
 
@@ -63,6 +70,8 @@ class Application(web.Application):
         statsd_settings.setdefault('host', os.environ.get('STATSD_HOST'))
         statsd_settings.setdefault('port',
                                    os.environ.get('STATSD_PORT', '8125'))
+        statsd_settings.setdefault('protocol',
+                                   os.environ.get('STATSD_PROTOCOL', 'tcp'))
 
         try:
             prefix = '.'.join([
@@ -98,6 +107,15 @@ class Application(web.Application):
                 kwargs['reconnect_sleep'] = statsd_settings['reconnect_sleep']
             if 'wait_timeout' in statsd_settings:
                 kwargs['wait_timeout'] = statsd_settings['wait_timeout']
+            if statsd_settings['protocol'] == 'tcp':
+                kwargs['ip_protocol'] = socket.IPPROTO_TCP
+            elif statsd_settings['protocol'] == 'udp':
+                kwargs['ip_protocol'] = socket.IPPROTO_UDP
+            else:
+                raise RuntimeError(
+                    f'statsd configuration error:'
+                    f' {statsd_settings["protocol"]} is not a valid'
+                    f' protocol')
 
             self.statsd_connector = statsd.Connector(**kwargs)
             await self.statsd_connector.start()

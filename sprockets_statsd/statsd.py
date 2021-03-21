@@ -10,8 +10,8 @@ class Connector:
     :param host: statsd server to send metrics to
     :param port: socket port that the server is listening on
     :keyword ip_protocol: IP protocol to use for the underlying
-        socket -- either :data:`socket.IPPROTO_TCP` for TCP or
-        :data:`socket.IPPROTO_UDP` for UDP sockets.
+        socket -- either ``socket.IPPROTO_TCP`` for TCP or
+        ``socket.IPPROTO_UDP`` for UDP sockets.
     :param kwargs: additional keyword parameters are passed
         to the :class:`.Processor` initializer
 
@@ -117,7 +117,8 @@ class StatsdProtocol:
 
     def connection_made(self, transport: asyncio.Transport):
         """Capture the new transport and set the connected event."""
-        server, port = transport.get_extra_info('peername')
+        # NB - this will return a 4-part tuple in some cases
+        server, port = transport.get_extra_info('peername')[:2]
         self.logger.info('connected to statsd %s:%s', server, port)
         self.transport = transport
         self.connected.set()

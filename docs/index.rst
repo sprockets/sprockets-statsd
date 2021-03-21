@@ -17,7 +17,12 @@ the following environment variables.
 
    The TCP port number that the StatsD server is listening on.  This defaults to 8125 if it is not configured.
 
-You can fine tune the metric payloads and the connector by setting additional values in the ``stats`` key of
+.. envvar:: STATSD_PROTOCOL
+
+   The IP protocol to use when connecting to the StatsD server.  You can specify either "tcp" or "udp".  The
+   default is "tcp" if it not not configured.
+
+You can fine tune the metric payloads and the connector by setting additional values in the ``statsd`` key of
 :attr:`tornado.web.Application.settings`.  See the :class:`sprockets_statsd.mixins.Application` class
 documentation for a description of the supported settings.
 
