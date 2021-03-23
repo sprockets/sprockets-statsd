@@ -45,7 +45,7 @@ class ApplicationTests(testing.AsyncTestCase):
         self.assertIsNone(app.settings['statsd']['host'],
                           'default host value should be None')
         self.assertEqual(8125, app.settings['statsd']['port'])
-        self.assertEqual('applications', app.settings['statsd']['prefix'])
+        self.assertEqual(None, app.settings['statsd']['prefix'])
 
     def test_that_statsd_settings_read_from_environment(self):
         self.setenv('STATSD_HOST', 'statsd')
@@ -56,22 +56,21 @@ class ApplicationTests(testing.AsyncTestCase):
         self.assertEqual('statsd', app.settings['statsd']['host'])
         self.assertEqual(5218, app.settings['statsd']['port'])
 
-    def test_that_service_included_in_prefix_if_set(self):
+    def test_prefix_when_only_service_is_set(self):
         app = sprockets_statsd.mixins.Application(service='blah')
         self.assertIn('statsd', app.settings)
-        self.assertEqual('applications.blah', app.settings['statsd']['prefix'])
+        self.assertEqual(None, app.settings['statsd']['prefix'])
 
-    def test_that_environment_included_in_prefix_if_set(self):
+    def test_prefix_when_only_environment_is_set(self):
         app = sprockets_statsd.mixins.Application(environment='whatever')
         self.assertIn('statsd', app.settings)
-        self.assertEqual('applications.whatever',
-                         app.settings['statsd']['prefix'])
+        self.assertEqual(None, app.settings['statsd']['prefix'])
 
-    def test_fully_specified_prefix(self):
-        app = sprockets_statsd.mixins.Application(environment='whatever',
-                                                  service='blah')
+    def test_prefix_default_when_service_and_environment_are_set(self):
+        app = sprockets_statsd.mixins.Application(environment='development',
+                                                  service='my-service')
         self.assertIn('statsd', app.settings)
-        self.assertEqual('applications.blah.whatever',
+        self.assertEqual('applications.my-service.development',
                          app.settings['statsd']['prefix'])
 
     def test_overridden_settings(self):
@@ -138,8 +137,11 @@ class RequestHandlerTests(testing.AsyncHTTPTestCase):
         self.io_loop.spawn_callback(self.statsd_server.run)
         self.io_loop.run_sync(self.statsd_server.wait_running)
 
-        self.app.settings['statsd']['host'] = self.statsd_server.host
-        self.app.settings['statsd']['port'] = self.statsd_server.port
+        self.app.settings['statsd'].update({
+            'host': self.statsd_server.host,
+            'port': self.statsd_server.port,
+            'prefix': 'applications.service',
+        })
         self.io_loop.run_sync(self.app.start_statsd)
 
     def tearDown(self):
@@ -183,7 +185,7 @@ class RequestHandlerTests(testing.AsyncHTTPTestCase):
         self.wait_for_metrics()
 
         path, _, type_code = self.find_metric('Handler.GET.200')
-        self.assertEqual(path, 'applications.timers.Handler.GET.200')
+        self.assertEqual(path, 'applications.service.timers.Handler.GET.200')
         self.assertEqual('ms', type_code)
 
     def test_execution_timer(self):
@@ -192,7 +194,7 @@ class RequestHandlerTests(testing.AsyncHTTPTestCase):
         self.wait_for_metrics()
 
         path, _, type_code = self.find_metric('execution-timer')
-        self.assertEqual('applications.timers.execution-timer', path)
+        self.assertEqual('applications.service.timers.execution-timer', path)
         self.assertEqual('ms', type_code)
 
     def test_counter(self):
@@ -201,7 +203,7 @@ class RequestHandlerTests(testing.AsyncHTTPTestCase):
         self.wait_for_metrics()
 
         path, value, type_code = self.find_metric('request-count')
-        self.assertEqual('applications.counters.request-count', path)
+        self.assertEqual('applications.service.counters.request-count', path)
         self.assertEqual(1.0, value)
         self.assertEqual('c', type_code)
 

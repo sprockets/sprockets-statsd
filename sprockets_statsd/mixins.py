@@ -11,25 +11,12 @@ class Application(web.Application):
     """Mix this into your application to add a statsd connection.
 
     This mix-in is configured by the ``statsd`` settings key.  The
-    value should be a dictionary with the following keys.
+    value is a dictionary with the following keys.
 
     +-------------------+---------------------------------------------+
     | host              | the statsd host to send metrics to          |
     +-------------------+---------------------------------------------+
-    | port              | TCP port number that statsd is listening on |
-    +-------------------+---------------------------------------------+
-
-    *host* defaults to the :envvar:`STATSD_HOST` environment variable.
-    If this value is not set, then the statsd connector **WILL NOT**
-    be enabled.
-
-    *port* defaults to the :envvar:`STATSD_PORT` environment variable
-    with a back up default of 8125 if the environment variable is not
-    set.
-
-    The following keys MAY also be specified to fine tune the statsd
-    connection.
-
+    | port              | port number that statsd is listening on     |
     +-------------------+---------------------------------------------+
     | prefix            | segment to prefix to metrics.               |
     +-------------------+---------------------------------------------+
@@ -41,14 +28,27 @@ class Application(web.Application):
     |                   | connection                                  |
     +-------------------+---------------------------------------------+
 
-    *prefix* defaults to ``applications.<service>.<environment>`` where
-    *<service>* and *<environment>* are replaced with the keys from
-    `settings` if they are present.
+    **host** defaults to the :envvar:`STATSD_HOST` environment variable.
+    If this value is not set, then the statsd connector *WILL NOT* be
+    enabled.
 
-    *reconnect_timeout* defaults to 1.0 seconds which limits the
+    **port** defaults to the :envvar:`STATSD_PORT` environment variable
+    with a back up default of 8125 if the environment variable is not
+    set.
+
+    **prefix** is prefixed to all metric paths.  This provides a
+    namespace for metrics so that each applications metrics are maintained
+    in separate buckets.
+
+    If the *service* and *environment* keys are set in ``settings``,
+    then the default prefix is ``applications.<service>.<environment>``.
+    This is a convenient way to maintain consistent metric paths when
+    you are managing a larger number of services.
+
+    **reconnect_timeout** defaults to 1.0 seconds which limits the
     aggressiveness of creating new TCP connections.
 
-    *wait_timeout* defaults to 0.1 seconds which ensures that the
+    **wait_timeout** defaults to 0.1 seconds which ensures that the
     processor quickly responds to connection faults.
 
     """
@@ -58,12 +58,15 @@ class Application(web.Application):
         statsd_settings.setdefault('port',
                                    os.environ.get('STATSD_PORT', '8125'))
 
-        prefix = ['applications']
-        if 'service' in settings:
-            prefix.append(settings['service'])
-        if 'environment' in settings:
-            prefix.append(settings['environment'])
-        statsd_settings.setdefault('prefix', '.'.join(prefix))
+        try:
+            prefix = '.'.join([
+                'applications',
+                settings['service'],
+                settings['environment'],
+            ])
+        except KeyError:
+            prefix = None
+        statsd_settings.setdefault('prefix', prefix)
 
         super().__init__(*args, **settings)
 
