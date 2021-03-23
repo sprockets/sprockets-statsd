@@ -98,11 +98,11 @@ class ApplicationTests(testing.AsyncTestCase):
         })
         try:
             self.io_loop.run_sync(app.start_statsd)
-            connector = app.settings['statsd']['_connector']
+            connector = app.statsd_connector
             self.assertIsNotNone(connector, 'statsd.Connector not created')
 
             self.io_loop.run_sync(app.start_statsd)
-            self.assertIs(app.settings['statsd']['_connector'], connector,
+            self.assertIs(app.statsd_connector, connector,
                           'statsd.Connector should not be recreated')
         finally:
             self.io_loop.run_sync(app.stop_statsd)
@@ -124,7 +124,7 @@ class ApplicationTests(testing.AsyncTestCase):
             })
         self.io_loop.run_sync(app.start_statsd)
 
-        processor = app.settings['statsd']['_connector'].processor
+        processor = app.statsd_connector.processor
         self.assertEqual(0.5, processor._reconnect_sleep)
         self.assertEqual(0.25, processor._wait_timeout)
         self.io_loop.run_sync(app.stop_statsd)

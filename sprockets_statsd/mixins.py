@@ -10,6 +10,12 @@ from sprockets_statsd import statsd
 class Application(web.Application):
     """Mix this into your application to add a statsd connection.
 
+    .. attribute:: statsd_connector
+       :type: sprockets_statsd.statsd.Connector
+
+       Connection to the StatsD server that is set between calls
+       to :meth:`.start_statsd` and :meth:`.stop_statsd`.
+
     This mix-in is configured by the ``statsd`` settings key.  The
     value is a dictionary with the following keys.
 
@@ -71,7 +77,7 @@ class Application(web.Application):
         super().__init__(*args, **settings)
 
         self.settings['statsd']['port'] = int(self.settings['statsd']['port'])
-        self.__statsd_connector = None
+        self.statsd_connector = None
 
     async def start_statsd(self):
         """Start the connector during startup.
@@ -82,8 +88,8 @@ class Application(web.Application):
         until the connector is running.
 
         """
-        statsd_settings = self.settings['statsd']
-        if statsd_settings.get('_connector') is None:
+        if self.statsd_connector is None:
+            statsd_settings = self.settings['statsd']
             kwargs = {
                 'host': statsd_settings['host'],
                 'port': statsd_settings['port'],
@@ -92,9 +98,9 @@ class Application(web.Application):
                 kwargs['reconnect_sleep'] = statsd_settings['reconnect_sleep']
             if 'wait_timeout' in statsd_settings:
                 kwargs['wait_timeout'] = statsd_settings['wait_timeout']
-            connector = statsd.Connector(**kwargs)
-            await connector.start()
-            self.settings['statsd']['_connector'] = connector
+
+            self.statsd_connector = statsd.Connector(**kwargs)
+            await self.statsd_connector.start()
 
     async def stop_statsd(self):
         """Stop the connector during shutdown.
@@ -104,18 +110,19 @@ class Application(web.Application):
         connector is stopped.
 
         """
-        connector = self.settings['statsd'].pop('_connector', None)
-        if connector is not None:
-            await connector.stop()
+        if self.statsd_connector is not None:
+            await self.statsd_connector.stop()
+            self.statsd_connector = None
 
 
 class RequestHandler(web.RequestHandler):
     """Mix this into your handler to send metrics to a statsd server."""
-    __connector: statsd.Connector
+    statsd_connector: statsd.Connector
 
     def initialize(self, **kwargs):
         super().initialize(**kwargs)
-        self.__connector = self.settings.get('statsd', {}).get('_connector')
+        self.application: Application
+        self.statsd_connector = self.application.statsd_connector
 
     def __build_path(self, *path):
         full_path = '.'.join(str(c) for c in path)
@@ -130,9 +137,9 @@ class RequestHandler(web.RequestHandler):
         :param path: path to record the duration under
 
         """
-        if self.__connector is not None:
-            self.__connector.inject_metric(self.__build_path('timers', *path),
-                                           secs * 1000.0, 'ms')
+        if self.statsd_connector is not None:
+            self.statsd_connector.inject_metric(
+                self.__build_path('timers', *path), secs * 1000.0, 'ms')
 
     def increase_counter(self, *path, amount: int = 1):
         """Adjust a counter.
@@ -142,8 +149,8 @@ class RequestHandler(web.RequestHandler):
             1 and can be negative
 
         """
-        if self.__connector is not None:
-            self.__connector.inject_metric(
+        if self.statsd_connector is not None:
+            self.statsd_connector.inject_metric(
                 self.__build_path('counters', *path), amount, 'c')
 
     @contextlib.contextmanager
