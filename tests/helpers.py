@@ -4,14 +4,8 @@ import socket
 import typing
 
 
-class SupportsClose(typing.Protocol):
-    def close(self) -> None:
-        ...
-
-
 class StatsdServer(asyncio.DatagramProtocol, asyncio.Protocol):
     metrics: typing.List[bytes]
-    server: typing.Union[SupportsClose, None]
 
     def __init__(self, ip_protocol):
         self.server = None
