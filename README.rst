@@ -15,8 +15,8 @@ This library provides connectors to send metrics to a statsd_ instance using eit
    async def do_stuff():
       start = time.time()
       response = make_some_http_call()
-      statsd.inject_metric(f'timers.http.something.{response.code}',
-                           (time.time() - start) * 1000.0, 'ms')
+      statsd.timing(f'timers.http.something.{response.code}',
+                    (time.time() - start))
 
    async def main():
       await statsd.start()
@@ -28,8 +28,21 @@ This library provides connectors to send metrics to a statsd_ instance using eit
 The ``Connector`` instance maintains a resilient connection to the target StatsD instance, formats the metric data
 into payloads, and sends them to the StatsD target.  It defaults to using TCP as the transport but will use UDP if
 the ``ip_protocol`` keyword is set to ``socket.IPPROTO_UDP``.  The ``Connector.start`` method starts a background
-``asyncio.Task`` that is responsible for maintaining the connection.  The ``inject_metric`` method enqueues metric
-data to send and the task consumes the internal queue when it is connected.
+``asyncio.Task`` that is responsible for maintaining the connection.  The ``timing`` method enqueues a timing
+metric to send and the task consumes the internal queue when it is connected.
+
+The following convenience methods are available.  You can also call ``inject_metric`` for complete control over
+the payload.
+
++--------------+--------------------------------------+
+| ``incr``     | Increment a counter metric           |
++--------------+--------------------------------------+
+| ``decr``     | Decrement a counter metric           |
++--------------+--------------------------------------+
+| ``gauge``    | Adjust or set a gauge metric         |
++--------------+--------------------------------------+
+| ``timing``   | Append a duration to a timer metric  |
++--------------+--------------------------------------+
 
 Tornado helpers
 ===============

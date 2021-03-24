@@ -170,8 +170,8 @@ class RequestHandler(web.RequestHandler):
 
         """
         if self.statsd_connector is not None:
-            self.statsd_connector.inject_metric(
-                self.__build_path('timers', *path), secs * 1000.0, 'ms')
+            self.statsd_connector.timing(self.__build_path('timers', *path),
+                                         secs)
 
     def increase_counter(self, *path, amount: int = 1):
         """Adjust a counter.
@@ -182,8 +182,8 @@ class RequestHandler(web.RequestHandler):
 
         """
         if self.statsd_connector is not None:
-            self.statsd_connector.inject_metric(
-                self.__build_path('counters', *path), amount, 'c')
+            self.statsd_connector.incr(self.__build_path('counters', *path),
+                                       amount)
 
     @contextlib.contextmanager
     def execution_timer(self, *path):

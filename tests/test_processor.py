@@ -218,8 +218,8 @@ class UDPProcessingTests(ProcessorTestCase):
         await super().asyncTearDown()
 
     async def test_sending_metrics(self):
-        self.connector.inject_metric('counter', 1, 'c')
-        self.connector.inject_metric('timer', 1.0, 'ms')
+        self.connector.incr('counter')
+        self.connector.timing('timer', 0.001)
         await self.wait_for(self.statsd_server.message_received.acquire())
         await self.wait_for(self.statsd_server.message_received.acquire())
 
@@ -230,13 +230,13 @@ class UDPProcessingTests(ProcessorTestCase):
         self.statsd_server.close()
         await self.statsd_server.wait_closed()
 
-        self.connector.inject_metric('should.be.lost', 1, 'c')
+        self.connector.incr('should.be.lost')
         await asyncio.sleep(self.connector.processor._wait_timeout * 2)
 
         self.statsd_task = asyncio.create_task(self.statsd_server.run())
         await self.statsd_server.wait_running()
 
-        self.connector.inject_metric('should.be.recvd', 1, 'c')
+        self.connector.incr('should.be.recvd')
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assertEqual(self.statsd_server.metrics[0], b'should.be.recvd:1|c')
 
@@ -245,7 +245,7 @@ class UDPProcessingTests(ProcessorTestCase):
         await self.wait_for(
             asyncio.sleep(self.connector.processor._reconnect_sleep))
 
-        self.connector.inject_metric('should.be.recvd', 1, 'c')
+        self.connector.incr('should.be.recvd')
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assertEqual(self.statsd_server.metrics[0], b'should.be.recvd:1|c')
 
@@ -272,16 +272,31 @@ class ConnectorTests(ProcessorTestCase):
         self.assertEqual(recvd_value, str(value), 'metric value mismatch')
         self.assertEqual(recvd_code, type_code, 'metric type mismatch')
 
-    async def test_sending_simple_counter(self):
-        self.connector.inject_metric('simple.counter', 1000, 'c')
+    async def test_adjusting_counter(self):
+        self.connector.incr('simple.counter')
         await self.wait_for(self.statsd_server.message_received.acquire())
-        self.assert_metrics_equal(self.statsd_server.metrics[0],
-                                  'simple.counter', 1000, 'c')
+        self.assert_metrics_equal(self.statsd_server.metrics[-1],
+                                  'simple.counter', 1, 'c')
+
+        self.connector.incr('simple.counter', 10)
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assert_metrics_equal(self.statsd_server.metrics[-1],
+                                  'simple.counter', 10, 'c')
+
+        self.connector.decr('simple.counter')
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assert_metrics_equal(self.statsd_server.metrics[-1],
+                                  'simple.counter', -1, 'c')
+
+        self.connector.decr('simple.counter', 10)
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assert_metrics_equal(self.statsd_server.metrics[-1],
+                                  'simple.counter', -10, 'c')
 
     async def test_adjusting_gauge(self):
-        self.connector.inject_metric('simple.gauge', 100, 'g')
-        self.connector.inject_metric('simple.gauge', -10, 'g')
-        self.connector.inject_metric('simple.gauge', '+10', 'g')
+        self.connector.gauge('simple.gauge', 100)
+        self.connector.gauge('simple.gauge', -10, delta=True)
+        self.connector.gauge('simple.gauge', 10, delta=True)
         for _ in range(3):
             await self.wait_for(self.statsd_server.message_received.acquire())
 
@@ -294,7 +309,7 @@ class ConnectorTests(ProcessorTestCase):
 
     async def test_sending_timer(self):
         secs = 12.34
-        self.connector.inject_metric('simple.timer', secs * 1000.0, 'ms')
+        self.connector.timing('simple.timer', secs)
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assert_metrics_equal(self.statsd_server.metrics[0],
                                   'simple.timer', 12340.0, 'ms')
@@ -309,9 +324,9 @@ class ConnectorTests(ProcessorTestCase):
 
         async def fake_process_metric():
             if not self.connector.processor.should_terminate:
-                self.connector.inject_metric('counter', 1, 'c')
-                self.connector.inject_metric('counter', 2, 'c')
-                self.connector.inject_metric('counter', 3, 'c')
+                self.connector.incr('counter', 1)
+                self.connector.incr('counter', 2)
+                self.connector.incr('counter', 3)
                 self.connector.processor.should_terminate = True
             return await real_process_metric()
 
@@ -325,7 +340,7 @@ class ConnectorTests(ProcessorTestCase):
         await self.statsd_server.wait_closed()
 
         for value in range(50):
-            self.connector.inject_metric('counter', value, 'c')
+            self.connector.incr('counter', value)
 
         asyncio.create_task(self.statsd_server.run())
         await self.wait_for(self.statsd_server.client_connected.acquire())

@@ -60,6 +60,53 @@ class Connector:
         """
         await self.processor.stop()
 
+    def incr(self, path: str, value: int = 1):
+        """Increment a counter metric.
+
+        :param path: counter to increment
+        :param value: amount to increment the counter by
+
+        """
+        self.inject_metric(path, str(value), 'c')
+
+    def decr(self, path: str, value: int = 1):
+        """Decrement a counter metric.
+
+        :param path: counter to decrement
+        :param value: amount to decrement the counter by
+
+        This is equivalent to ``self.incr(path, -value)``.
+
+        """
+        self.inject_metric(path, str(-value), 'c')
+
+    def gauge(self, path: str, value: int, delta: bool = False):
+        """Manipulate a gauge metric.
+
+        :param path: gauge to adjust
+        :param value: value to send
+        :param delta: is this an adjustment of the gauge?
+
+        If the `delta` parameter is ``False`` (or omitted), then
+        `value` is the new value to set the gauge to.  Otherwise,
+        `value` is an adjustment for the current gauge.
+
+        """
+        if delta:
+            value = f'{value:+d}'
+        else:
+            value = str(value)
+        self.inject_metric(path, value, 'g')
+
+    def timing(self, path: str, seconds: float):
+        """Send a timer metric.
+
+        :param path: timer to append a value to
+        :param seconds: number of **seconds** to record
+
+        """
+        self.inject_metric(path, seconds * 1000.0, 'ms')
+
     def inject_metric(self, path: str, value, type_code: str):
         """Send a metric to the statsd server.
 
