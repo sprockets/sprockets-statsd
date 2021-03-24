@@ -17,6 +17,11 @@ the following environment variables.
 
    The TCP port number that the StatsD server is listening on.  This defaults to 8125 if it is not configured.
 
+.. envvar:: STATSD_PREFIX
+
+   Optional prefix to use for metric paths.  See the documentation for :class:`~sprockets_statsd.mixins.Application`
+   for addition notes on setting the path prefix.
+
 .. envvar:: STATSD_PROTOCOL
 
    The IP protocol to use when connecting to the StatsD server.  You can specify either "tcp" or "udp".  The

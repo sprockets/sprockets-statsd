@@ -73,15 +73,18 @@ class Application(web.Application):
         statsd_settings.setdefault('protocol',
                                    os.environ.get('STATSD_PROTOCOL', 'tcp'))
 
-        try:
-            prefix = '.'.join([
-                'applications',
-                settings['service'],
-                settings['environment'],
-            ])
-        except KeyError:
-            prefix = None
-        statsd_settings.setdefault('prefix', prefix)
+        if os.environ.get('STATSD_PREFIX'):
+            statsd_settings.setdefault('prefix', os.environ['STATSD_PREFIX'])
+        else:
+            try:
+                prefix = '.'.join([
+                    'applications',
+                    settings['service'],
+                    settings['environment'],
+                ])
+            except KeyError:
+                prefix = None
+            statsd_settings.setdefault('prefix', prefix)
 
         super().__init__(*args, **settings)
 

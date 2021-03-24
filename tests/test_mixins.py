@@ -51,6 +51,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
     def test_statsd_setting_defaults(self):
         self.unsetenv('STATSD_HOST')
         self.unsetenv('STATSD_PORT')
+        self.unsetenv('STATSD_PREFIX')
         self.unsetenv('STATSD_PROTOCOL')
 
         app = sprockets_statsd.mixins.Application()
@@ -64,12 +65,14 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
     def test_that_statsd_settings_read_from_environment(self):
         self.setenv('STATSD_HOST', 'statsd')
         self.setenv('STATSD_PORT', '5218')
+        self.setenv('STATSD_PREFIX', 'my-service')
         self.setenv('STATSD_PROTOCOL', 'udp')
 
         app = sprockets_statsd.mixins.Application()
         self.assertIn('statsd', app.settings)
         self.assertEqual('statsd', app.settings['statsd']['host'])
         self.assertEqual(5218, app.settings['statsd']['port'])
+        self.assertEqual('my-service', app.settings['statsd']['prefix'])
         self.assertEqual('udp', app.settings['statsd']['protocol'])
 
     def test_prefix_when_only_service_is_set(self):
@@ -92,6 +95,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
     def test_overridden_settings(self):
         self.setenv('STATSD_HOST', 'statsd')
         self.setenv('STATSD_PORT', '9999')
+        self.setenv('STATSD_PREFIX', 'service')
         self.setenv('STATSD_PROTOCOL', 'tcp')
         app = sprockets_statsd.mixins.Application(
             statsd={
