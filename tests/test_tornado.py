@@ -62,7 +62,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         self.unsetenv('STATSD_PREFIX')
         self.unsetenv('STATSD_PROTOCOL')
 
-        app = sprockets_statsd.tornado.Application()
+        app = sprockets_statsd.tornado.Application(statsd={'prefix': None})
         self.assertIn('statsd', app.settings)
         self.assertIsNone(app.settings['statsd']['host'],
                           'default host value should be None')
@@ -84,14 +84,12 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         self.assertEqual('udp', app.settings['statsd']['protocol'])
 
     def test_prefix_when_only_service_is_set(self):
-        app = sprockets_statsd.tornado.Application(service='blah')
-        self.assertIn('statsd', app.settings)
-        self.assertEqual(None, app.settings['statsd']['prefix'])
+        with self.assertRaises(RuntimeError):
+            sprockets_statsd.tornado.Application(service='blah')
 
     def test_prefix_when_only_environment_is_set(self):
-        app = sprockets_statsd.tornado.Application(environment='whatever')
-        self.assertIn('statsd', app.settings)
-        self.assertEqual(None, app.settings['statsd']['prefix'])
+        with self.assertRaises(RuntimeError):
+            sprockets_statsd.tornado.Application(environment='whatever')
 
     def test_prefix_default_when_service_and_environment_are_set(self):
         app = sprockets_statsd.tornado.Application(environment='development',
@@ -117,35 +115,20 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         self.assertEqual('myapp', app.settings['statsd']['prefix'])
         self.assertEqual('udp', app.settings['statsd']['protocol'])
 
-    def test_that_starting_without_configuration_fails(self):
+    def test_that_starting_without_host_fails(self):
         self.unsetenv('STATSD_HOST')
-        app = sprockets_statsd.tornado.Application()
+        app = sprockets_statsd.tornado.Application(statsd={'prefix': 'app'})
         with self.assertRaises(RuntimeError):
             self.run_coroutine(app.start_statsd())
 
-    def test_that_starting_without_prefix_fails_by_default(self):
+    def test_creating_without_prefix_on_purpose(self):
         self.unsetenv('STATSD_PREFIX')
         app = sprockets_statsd.tornado.Application(statsd={
             'host': 'statsd.example.com',
             'protocol': 'udp',
+            'prefix': None,
         })
-        with self.assertRaises(RuntimeError) as cm:
-            self.run_coroutine(app.start_statsd())
-        self.assertTrue('prefix is not set' in str(cm.exception),
-                        'Expected "prefix is not set" in exception message')
-
-    def test_starting_without_prefix_on_purpose(self):
-        self.unsetenv('STATSD_PREFIX')
-        app = sprockets_statsd.tornado.Application(
-            statsd={
-                'allow_no_prefix': True,
-                'host': 'statsd.example.com',
-                'protocol': 'udp',
-            })
-        try:
-            self.run_coroutine(app.start_statsd())
-        finally:
-            self.run_coroutine(app.stop_statsd())
+        self.assertEqual(None, app.settings['statsd']['prefix'])
 
     def test_starting_with_calculated_prefix(self):
         self.unsetenv('STATSD_PREFIX')
@@ -184,6 +167,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         app = sprockets_statsd.tornado.Application(statsd={
             'host': 'localhost',
             'port': '8125',
+            'prefix': 'my-service',
         })
         self.run_coroutine(app.stop_statsd())
 
@@ -244,8 +228,6 @@ class RequestHandlerTests(AsyncTestCaseWithTimeout, testing.AsyncHTTPTestCase):
         self.app.settings['statsd'].update({
             'host': self.statsd_server.host,
             'port': self.statsd_server.port,
-            'prefix': 'applications.service',
-            'protocol': 'tcp',
         })
         self.run_coroutine(self.app.start_statsd())
 
@@ -256,7 +238,10 @@ class RequestHandlerTests(AsyncTestCaseWithTimeout, testing.AsyncHTTPTestCase):
         super().tearDown()
 
     def get_app(self):
-        self.app = Application()
+        self.app = Application(statsd={
+            'prefix': 'applications.service',
+            'protocol': 'tcp',
+        })
         return self.app
 
     def wait_for_metrics(self, metric_count=3):

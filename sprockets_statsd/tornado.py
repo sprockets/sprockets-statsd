@@ -56,9 +56,9 @@ class Application(web.Application):
 
     .. rubric:: Warning
 
-    If you want to run without a prefix, then you are required to also
-    set the ``allow_no_prefix`` key with a *truthy* value.  This prevents
-    accidentilly polluting the metric namespace with unqualified paths.
+    If you want to run without a prefix, then you are required to explicitly
+    set ``statsd.prefix`` to ``None``.  This prevents accidentally polluting
+    the metric namespace with unqualified paths.
 
     **protocol** defaults to the :envvar:`STATSD_PROTOCOL` environment
     variable with a back default of "tcp" if the environment variable
@@ -79,18 +79,19 @@ class Application(web.Application):
         statsd_settings.setdefault('protocol',
                                    os.environ.get('STATSD_PROTOCOL', 'tcp'))
 
-        if os.environ.get('STATSD_PREFIX'):
-            statsd_settings.setdefault('prefix', os.environ['STATSD_PREFIX'])
-        else:
-            try:
-                prefix = '.'.join([
-                    'applications',
-                    settings['service'],
-                    settings['environment'],
-                ])
-            except KeyError:
-                prefix = None
-            statsd_settings.setdefault('prefix', prefix)
+        if 'prefix' not in statsd_settings:
+            statsd_settings['prefix'] = os.environ.get('STATSD_PREFIX')
+            if not statsd_settings['prefix']:
+                try:
+                    statsd_settings['prefix'] = '.'.join([
+                        'applications',
+                        settings['service'],
+                        settings['environment'],
+                    ])
+                except KeyError:
+                    raise RuntimeError(
+                        'statsd configuration error: prefix is not set.  Set'
+                        ' $STATSD_PREFIX or configure settings.statsd.prefix')
 
         super().__init__(*args, **settings)
 
@@ -108,11 +109,6 @@ class Application(web.Application):
         """
         if self.statsd_connector is None:
             statsd_settings = self.settings['statsd']
-            if (statsd_settings.get('prefix', None) is None
-                    and not statsd_settings.get('allow_no_prefix', False)):
-                raise RuntimeError(
-                    'statsd configuration error: prefix is not set')
-
             kwargs = {
                 'host': statsd_settings['host'],
                 'port': statsd_settings['port'],
