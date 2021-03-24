@@ -6,13 +6,13 @@ import typing
 
 from tornado import testing, web
 
-import sprockets_statsd.mixins
+import sprockets_statsd.tornado
 from tests import helpers
 
 ParsedMetric = typing.Tuple[str, float, str]
 
 
-class Handler(sprockets_statsd.mixins.RequestHandler, web.RequestHandler):
+class Handler(sprockets_statsd.tornado.RequestHandler, web.RequestHandler):
     async def get(self):
         with self.execution_timer('execution-timer'):
             await asyncio.sleep(0.1)
@@ -20,7 +20,7 @@ class Handler(sprockets_statsd.mixins.RequestHandler, web.RequestHandler):
         self.write('true')
 
 
-class Application(sprockets_statsd.mixins.Application, web.Application):
+class Application(sprockets_statsd.tornado.Application, web.Application):
     def __init__(self, **settings):
         super().__init__([web.url('/', Handler)], **settings)
 
@@ -62,7 +62,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         self.unsetenv('STATSD_PREFIX')
         self.unsetenv('STATSD_PROTOCOL')
 
-        app = sprockets_statsd.mixins.Application()
+        app = sprockets_statsd.tornado.Application()
         self.assertIn('statsd', app.settings)
         self.assertIsNone(app.settings['statsd']['host'],
                           'default host value should be None')
@@ -76,7 +76,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         self.setenv('STATSD_PREFIX', 'my-service')
         self.setenv('STATSD_PROTOCOL', 'udp')
 
-        app = sprockets_statsd.mixins.Application()
+        app = sprockets_statsd.tornado.Application()
         self.assertIn('statsd', app.settings)
         self.assertEqual('statsd', app.settings['statsd']['host'])
         self.assertEqual(5218, app.settings['statsd']['port'])
@@ -84,18 +84,18 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         self.assertEqual('udp', app.settings['statsd']['protocol'])
 
     def test_prefix_when_only_service_is_set(self):
-        app = sprockets_statsd.mixins.Application(service='blah')
+        app = sprockets_statsd.tornado.Application(service='blah')
         self.assertIn('statsd', app.settings)
         self.assertEqual(None, app.settings['statsd']['prefix'])
 
     def test_prefix_when_only_environment_is_set(self):
-        app = sprockets_statsd.mixins.Application(environment='whatever')
+        app = sprockets_statsd.tornado.Application(environment='whatever')
         self.assertIn('statsd', app.settings)
         self.assertEqual(None, app.settings['statsd']['prefix'])
 
     def test_prefix_default_when_service_and_environment_are_set(self):
-        app = sprockets_statsd.mixins.Application(environment='development',
-                                                  service='my-service')
+        app = sprockets_statsd.tornado.Application(environment='development',
+                                                   service='my-service')
         self.assertIn('statsd', app.settings)
         self.assertEqual('applications.my-service.development',
                          app.settings['statsd']['prefix'])
@@ -105,7 +105,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         self.setenv('STATSD_PORT', '9999')
         self.setenv('STATSD_PREFIX', 'service')
         self.setenv('STATSD_PROTOCOL', 'tcp')
-        app = sprockets_statsd.mixins.Application(
+        app = sprockets_statsd.tornado.Application(
             statsd={
                 'host': 'statsd.example.com',
                 'port': 5218,
@@ -119,13 +119,13 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
 
     def test_that_starting_without_configuration_fails(self):
         self.unsetenv('STATSD_HOST')
-        app = sprockets_statsd.mixins.Application()
+        app = sprockets_statsd.tornado.Application()
         with self.assertRaises(RuntimeError):
             self.run_coroutine(app.start_statsd())
 
     def test_that_starting_without_prefix_fails_by_default(self):
         self.unsetenv('STATSD_PREFIX')
-        app = sprockets_statsd.mixins.Application(statsd={
+        app = sprockets_statsd.tornado.Application(statsd={
             'host': 'statsd.example.com',
             'protocol': 'udp',
         })
@@ -136,7 +136,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
 
     def test_starting_without_prefix_on_purpose(self):
         self.unsetenv('STATSD_PREFIX')
-        app = sprockets_statsd.mixins.Application(
+        app = sprockets_statsd.tornado.Application(
             statsd={
                 'allow_no_prefix': True,
                 'host': 'statsd.example.com',
@@ -149,7 +149,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
 
     def test_starting_with_calculated_prefix(self):
         self.unsetenv('STATSD_PREFIX')
-        app = sprockets_statsd.mixins.Application(
+        app = sprockets_statsd.tornado.Application(
             environment='development',
             service='my-service',
             statsd={
@@ -164,7 +164,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
             self.run_coroutine(app.stop_statsd())
 
     def test_starting_twice(self):
-        app = sprockets_statsd.mixins.Application(statsd={
+        app = sprockets_statsd.tornado.Application(statsd={
             'host': 'localhost',
             'port': '8125',
             'prefix': 'my-service',
@@ -181,14 +181,14 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
             self.run_coroutine(app.stop_statsd())
 
     def test_stopping_without_starting(self):
-        app = sprockets_statsd.mixins.Application(statsd={
+        app = sprockets_statsd.tornado.Application(statsd={
             'host': 'localhost',
             'port': '8125',
         })
         self.run_coroutine(app.stop_statsd())
 
     def test_optional_parameters(self):
-        app = sprockets_statsd.mixins.Application(
+        app = sprockets_statsd.tornado.Application(
             statsd={
                 'host': 'localhost',
                 'port': '8125',
@@ -204,7 +204,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         self.run_coroutine(app.stop_statsd())
 
     def test_starting_with_invalid_protocol(self):
-        app = sprockets_statsd.mixins.Application(statsd={
+        app = sprockets_statsd.tornado.Application(statsd={
             'host': 'localhost',
             'prefix': 'my-service',
             'protocol': 'unknown'
@@ -213,7 +213,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
             self.run_coroutine(app.start_statsd())
 
     def test_that_protocol_strings_are_translated(self):
-        app = sprockets_statsd.mixins.Application(statsd={
+        app = sprockets_statsd.tornado.Application(statsd={
             'host': 'localhost',
             'prefix': 'my-service',
             'protocol': 'tcp',
@@ -223,7 +223,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
                          app.statsd_connector.processor._ip_protocol)
         self.run_coroutine(app.stop_statsd())
 
-        app = sprockets_statsd.mixins.Application(statsd={
+        app = sprockets_statsd.tornado.Application(statsd={
             'host': 'localhost',
             'prefix': 'my-service',
             'protocol': 'udp',

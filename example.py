@@ -3,10 +3,10 @@ import logging
 
 from tornado import ioloop, web
 
-import sprockets_statsd.mixins
+import sprockets_statsd.tornado
 
 
-class MyHandler(sprockets_statsd.mixins.RequestHandler,
+class MyHandler(sprockets_statsd.tornado.RequestHandler,
                 web.RequestHandler):
     async def get(self):
         with self.execution_timer('some-operation'):
@@ -17,7 +17,7 @@ class MyHandler(sprockets_statsd.mixins.RequestHandler,
         await asyncio.sleep(1)
 
 
-class Application(sprockets_statsd.mixins.Application, web.Application):
+class Application(sprockets_statsd.tornado.Application, web.Application):
     def __init__(self, **settings):
         super().__init__([web.url('/', MyHandler)], **settings)
 

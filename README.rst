@@ -33,8 +33,9 @@ data to send and the task consumes the internal queue when it is connected.
 
 Tornado helpers
 ===============
-The ``sprockets_statsd.mixins`` module contains mix-in classes that make reporting metrics from your tornado_ web
-application simple.
+The ``sprockets_statsd.tornado`` module contains mix-in classes that make reporting metrics from your tornado_ web
+application simple.  You will need to install the ``sprockets_statsd[tornado]`` mix-in to ensure that the Tornado
+requirements for this library are met.
 
 .. code-block:: python
 
@@ -43,10 +44,10 @@ application simple.
    
    from tornado import ioloop, web
    
-   import sprockets_statsd.mixins
+   import sprockets_statsd.tornado
    
    
-   class MyHandler(sprockets_statsd.mixins.RequestHandler,
+   class MyHandler(sprockets_statsd.tornado.RequestHandler,
                    web.RequestHandler):
        async def get(self):
            with self.execution_timer('some-operation'):
@@ -57,8 +58,12 @@ application simple.
            await asyncio.sleep(1)
    
    
-   class Application(sprockets_statsd.mixins.Application, web.Application):
+   class Application(sprockets_statsd.tornado.Application, web.Application):
        def __init__(self, **settings):
+           settings['statsd'] = {
+               'host': os.environ['STATSD_HOST'],
+               'prefix': 'applications.my-service',
+           }
            super().__init__([web.url('/', MyHandler)], **settings)
    
        async def on_start(self):
@@ -83,8 +88,8 @@ application simple.
 
 This application will emit two timing metrics each time that the endpoint is invoked::
 
-   applications.timers.some-operation:1001.3449192047119|ms
-   applications.timers.MyHandler.GET.204:1002.4960041046143|ms
+   applications.my-service.timers.some-operation:1001.3449192047119|ms
+   applications.my-service.timers.MyHandler.GET.204:1002.4960041046143|ms
 
 You will need to set the ``$STATSD_HOST`` environment variable to enable the statsd processing inside of the
 application.  The ``RequestHandler`` class exposes methods that send counter and timing metrics to a statsd server.

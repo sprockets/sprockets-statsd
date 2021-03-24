@@ -4,3 +4,4 @@ graft tests
 include CHANGELOG.rst
 include example.py
 include LICENSE
+include tox.ini

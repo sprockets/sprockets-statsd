@@ -19,17 +19,17 @@ the following environment variables.
 
 .. envvar:: STATSD_PREFIX
 
-   Optional prefix to use for metric paths.  See the documentation for :class:`~sprockets_statsd.mixins.Application`
-   for addition notes on setting the path prefix.
+   Optional prefix to use for metric paths.  See the documentation for :class:`~sprockets_statsd.tornado.Application`
+   for addition notes on setting the path prefix when using the Tornado helpers.
 
 .. envvar:: STATSD_PROTOCOL
 
    The IP protocol to use when connecting to the StatsD server.  You can specify either "tcp" or "udp".  The
    default is "tcp" if it not not configured.
 
-You can fine tune the metric payloads and the connector by setting additional values in the ``statsd`` key of
-:attr:`tornado.web.Application.settings`.  See the :class:`sprockets_statsd.mixins.Application` class
-documentation for a description of the supported settings.
+If you are using the Tornado helper clases, then you can fine tune the metric payloads and the connector by
+setting additional values in the ``statsd`` key of :attr:`tornado.web.Application.settings`.  See the
+:class:`sprockets_statsd.tornado.Application` class documentation for a description of the supported settings.
 
 Reference
 =========
@@ -37,12 +37,12 @@ Reference
 .. autoclass:: sprockets_statsd.statsd.Connector
    :members:
 
-Mixin classes
--------------
-.. autoclass:: sprockets_statsd.mixins.Application
+Tornado helpers
+---------------
+.. autoclass:: sprockets_statsd.tornado.Application
    :members:
 
-.. autoclass:: sprockets_statsd.mixins.RequestHandler
+.. autoclass:: sprockets_statsd.tornado.RequestHandler
    :members:
 
 Internals
