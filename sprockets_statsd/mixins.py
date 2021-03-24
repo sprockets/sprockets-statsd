@@ -25,7 +25,7 @@ class Application(web.Application):
     +-------------------+---------------------------------------------+
     | port              | port number that statsd is listening on     |
     +-------------------+---------------------------------------------+
-    | prefix            | segment to prefix to metrics.               |
+    | prefix            | segment to prefix to metrics                |
     +-------------------+---------------------------------------------+
     | protocol          | "tcp" or "udp"                              |
     +-------------------+---------------------------------------------+
@@ -47,12 +47,18 @@ class Application(web.Application):
 
     **prefix** is prefixed to all metric paths.  This provides a
     namespace for metrics so that each applications metrics are maintained
-    in separate buckets.
+    in separate buckets.  The default is to use the :envvar:`STATSD_PREFIX`
+    environment variable.  If it is unset and the *service* and
+    *environment* keys are set in ``settings``, then the default is
+    ``applications.<service>.<environment>``.  This is a convenient way to
+    maintain consistent metric paths when you are managing a larger number
+    of services.
 
-    If the *service* and *environment* keys are set in ``settings``,
-    then the default prefix is ``applications.<service>.<environment>``.
-    This is a convenient way to maintain consistent metric paths when
-    you are managing a larger number of services.
+    .. rubric:: Warning
+
+    If you want to run without a prefix, then you are required to also
+    set the ``allow_no_prefix`` key with a *truthy* value.  This prevents
+    accidentilly polluting the metric namespace with unqualified paths.
 
     **protocol** defaults to the :envvar:`STATSD_PROTOCOL` environment
     variable with a back default of "tcp" if the environment variable
@@ -102,6 +108,11 @@ class Application(web.Application):
         """
         if self.statsd_connector is None:
             statsd_settings = self.settings['statsd']
+            if (statsd_settings.get('prefix', None) is None
+                    and not statsd_settings.get('allow_no_prefix', False)):
+                raise RuntimeError(
+                    'statsd configuration error: prefix is not set')
+
             kwargs = {
                 'host': statsd_settings['host'],
                 'port': statsd_settings['port'],

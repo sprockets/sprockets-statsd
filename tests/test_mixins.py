@@ -115,10 +115,51 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         with self.assertRaises(RuntimeError):
             self.run_coroutine(app.start_statsd())
 
+    def test_that_starting_without_prefix_fails_by_default(self):
+        self.unsetenv('STATSD_PREFIX')
+        app = sprockets_statsd.mixins.Application(statsd={
+            'host': 'statsd.example.com',
+            'protocol': 'udp',
+        })
+        with self.assertRaises(RuntimeError) as cm:
+            self.run_coroutine(app.start_statsd())
+        self.assertTrue('prefix is not set' in str(cm.exception),
+                        'Expected "prefix is not set" in exception message')
+
+    def test_starting_without_prefix_on_purpose(self):
+        self.unsetenv('STATSD_PREFIX')
+        app = sprockets_statsd.mixins.Application(
+            statsd={
+                'allow_no_prefix': True,
+                'host': 'statsd.example.com',
+                'protocol': 'udp',
+            })
+        try:
+            self.run_coroutine(app.start_statsd())
+        finally:
+            self.run_coroutine(app.stop_statsd())
+
+    def test_starting_with_calculated_prefix(self):
+        self.unsetenv('STATSD_PREFIX')
+        app = sprockets_statsd.mixins.Application(
+            environment='development',
+            service='my-service',
+            statsd={
+                'host': 'statsd.example.com',
+                'protocol': 'udp',
+            })
+        try:
+            self.run_coroutine(app.start_statsd())
+            self.assertEqual('applications.my-service.development',
+                             app.settings['statsd']['prefix'])
+        finally:
+            self.run_coroutine(app.stop_statsd())
+
     def test_starting_twice(self):
         app = sprockets_statsd.mixins.Application(statsd={
             'host': 'localhost',
             'port': '8125',
+            'prefix': 'my-service',
         })
         try:
             self.run_coroutine(app.start_statsd())
@@ -143,6 +184,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
             statsd={
                 'host': 'localhost',
                 'port': '8125',
+                'prefix': 'my-service',
                 'reconnect_sleep': 0.5,
                 'wait_timeout': 0.25,
             })
@@ -156,6 +198,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
     def test_starting_with_invalid_protocol(self):
         app = sprockets_statsd.mixins.Application(statsd={
             'host': 'localhost',
+            'prefix': 'my-service',
             'protocol': 'unknown'
         })
         with self.assertRaises(RuntimeError):
@@ -164,6 +207,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
     def test_that_protocol_strings_are_translated(self):
         app = sprockets_statsd.mixins.Application(statsd={
             'host': 'localhost',
+            'prefix': 'my-service',
             'protocol': 'tcp',
         })
         self.run_coroutine(app.start_statsd())
@@ -173,6 +217,7 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
 
         app = sprockets_statsd.mixins.Application(statsd={
             'host': 'localhost',
+            'prefix': 'my-service',
             'protocol': 'udp',
         })
         self.run_coroutine(app.start_statsd())
