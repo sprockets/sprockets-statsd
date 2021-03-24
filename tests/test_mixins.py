@@ -41,6 +41,14 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         super().setUp()
         self._environ = {}
 
+    def tearDown(self):
+        super().tearDown()
+        for name, value in self._environ.items():
+            if value is not None:
+                os.environ[name] = value
+            else:
+                os.environ.pop(name, None)
+
     def setenv(self, name, value):
         self._environ.setdefault(name, os.environ.pop(name, None))
         os.environ[name] = value
