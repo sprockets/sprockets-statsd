@@ -2,6 +2,7 @@ import contextlib
 import os
 import socket
 import time
+import typing
 
 from tornado import web
 
@@ -71,7 +72,9 @@ class Application(web.Application):
     processor quickly responds to connection faults.
 
     """
-    def __init__(self, *args, **settings):
+    statsd_connector: typing.Optional[statsd.Connector]
+
+    def __init__(self, *args: typing.Any, **settings: typing.Any):
         statsd_settings = settings.setdefault('statsd', {})
         statsd_settings.setdefault('host', os.environ.get('STATSD_HOST'))
         statsd_settings.setdefault('port',
@@ -98,7 +101,7 @@ class Application(web.Application):
         self.settings['statsd']['port'] = int(self.settings['statsd']['port'])
         self.statsd_connector = None
 
-    async def start_statsd(self):
+    async def start_statsd(self) -> None:
         """Start the connector during startup.
 
         Call this method during application startup to enable the statsd
@@ -130,7 +133,7 @@ class Application(web.Application):
             self.statsd_connector = statsd.Connector(**kwargs)
             await self.statsd_connector.start()
 
-    async def stop_statsd(self):
+    async def stop_statsd(self) -> None:
         """Stop the connector during shutdown.
 
         If the connector was started, then this method will gracefully
@@ -145,20 +148,20 @@ class Application(web.Application):
 
 class RequestHandler(web.RequestHandler):
     """Mix this into your handler to send metrics to a statsd server."""
-    statsd_connector: statsd.Connector
+    statsd_connector: typing.Optional[statsd.Connector]
 
-    def initialize(self, **kwargs):
+    def initialize(self, **kwargs: typing.Any) -> None:
         super().initialize(**kwargs)
         self.application: Application
         self.statsd_connector = self.application.statsd_connector
 
-    def __build_path(self, *path):
+    def __build_path(self, *path: typing.Any) -> str:
         full_path = '.'.join(str(c) for c in path)
         if self.settings.get('statsd', {}).get('prefix', ''):
             return f'{self.settings["statsd"]["prefix"]}.{full_path}'
         return full_path
 
-    def record_timing(self, secs: float, *path):
+    def record_timing(self, secs: float, *path: typing.Any) -> None:
         """Record the duration.
 
         :param secs: number of seconds to record
@@ -169,7 +172,7 @@ class RequestHandler(web.RequestHandler):
             self.statsd_connector.timing(self.__build_path('timers', *path),
                                          secs)
 
-    def increase_counter(self, *path, amount: int = 1):
+    def increase_counter(self, *path: typing.Any, amount: int = 1) -> None:
         """Adjust a counter.
 
         :param path: path of the counter to adjust
@@ -182,7 +185,8 @@ class RequestHandler(web.RequestHandler):
                                        amount)
 
     @contextlib.contextmanager
-    def execution_timer(self, *path):
+    def execution_timer(
+            self, *path: typing.Any) -> typing.Generator[None, None, None]:
         """Record the execution duration of a block of code.
 
         :param path: path to record the duration as
@@ -194,7 +198,7 @@ class RequestHandler(web.RequestHandler):
         finally:
             self.record_timing(time.time() - start, *path)
 
-    def on_finish(self):
+    def on_finish(self) -> None:
         """Extended to record the request time as a duration.
 
         This method extends :meth:`tornado.web.RequestHandler.on_finish`

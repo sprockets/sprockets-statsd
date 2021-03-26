@@ -35,11 +35,16 @@ class Connector:
        sends the metric payloads.
 
     """
-    def __init__(self, host: str, port: int = 8125, **kwargs):
-        self.processor = Processor(host=host, port=port, **kwargs)
-        self._processor_task = None
+    processor: 'Processor'
 
-    async def start(self):
+    def __init__(self,
+                 host: str,
+                 port: int = 8125,
+                 **kwargs: typing.Any) -> None:
+        self.processor = Processor(host=host, port=port, **kwargs)
+        self._processor_task: typing.Optional[asyncio.Task[None]] = None
+
+    async def start(self) -> None:
         """Start the processor in the background.
 
         This is a *blocking* method and does not return until the
@@ -49,7 +54,7 @@ class Connector:
         self._processor_task = asyncio.create_task(self.processor.run())
         await self.processor.running.wait()
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop the background processor.
 
         Items that are currently in the queue will be flushed to
@@ -60,7 +65,7 @@ class Connector:
         """
         await self.processor.stop()
 
-    def incr(self, path: str, value: int = 1):
+    def incr(self, path: str, value: int = 1) -> None:
         """Increment a counter metric.
 
         :param path: counter to increment
@@ -69,7 +74,7 @@ class Connector:
         """
         self.inject_metric(path, str(value), 'c')
 
-    def decr(self, path: str, value: int = 1):
+    def decr(self, path: str, value: int = 1) -> None:
         """Decrement a counter metric.
 
         :param path: counter to decrement
@@ -80,7 +85,7 @@ class Connector:
         """
         self.inject_metric(path, str(-value), 'c')
 
-    def gauge(self, path: str, value: int, delta: bool = False):
+    def gauge(self, path: str, value: int, delta: bool = False) -> None:
         """Manipulate a gauge metric.
 
         :param path: gauge to adjust
@@ -93,26 +98,25 @@ class Connector:
 
         """
         if delta:
-            value = f'{value:+d}'
+            payload = f'{value:+d}'
         else:
-            value = str(value)
-        self.inject_metric(path, value, 'g')
+            payload = str(value)
+        self.inject_metric(path, payload, 'g')
 
-    def timing(self, path: str, seconds: float):
+    def timing(self, path: str, seconds: float) -> None:
         """Send a timer metric.
 
         :param path: timer to append a value to
         :param seconds: number of **seconds** to record
 
         """
-        self.inject_metric(path, seconds * 1000.0, 'ms')
+        self.inject_metric(path, str(seconds * 1000.0), 'ms')
 
-    def inject_metric(self, path: str, value, type_code: str):
+    def inject_metric(self, path: str, value: str, type_code: str) -> None:
         """Send a metric to the statsd server.
 
         :param path: formatted metric name
-        :param value: metric value as a number or a string.  The
-            string form is required for relative gauges.
+        :param value: formatted metric value
         :param type_code: type of the metric to send
 
         This method formats the payload and inserts it on the
@@ -120,10 +124,10 @@ class Connector:
 
         """
         payload = f'{path}:{value}|{type_code}'
-        self.processor.queue.put_nowait(payload.encode('utf-8'))
+        self.processor.enqueue(payload.encode('utf-8'))
 
 
-class StatsdProtocol:
+class StatsdProtocol(asyncio.BaseProtocol):
     """Common interface for backend protocols/transports.
 
     UDP and TCP transports have different interfaces (sendto vs write)
@@ -145,9 +149,12 @@ class StatsdProtocol:
        Is the protocol currently connected?
 
     """
+    buffered_data: bytes
+    ip_protocol: int = socket.IPPROTO_NONE
     logger: logging.Logger
+    transport: typing.Optional[asyncio.BaseTransport]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.buffered_data = b''
         self.connected = asyncio.Event()
         self.logger = logging.getLogger(__package__).getChild(
@@ -162,15 +169,16 @@ class StatsdProtocol:
         """Shutdown the transport and wait for it to close."""
         raise NotImplementedError()
 
-    def connection_made(self, transport: asyncio.Transport):
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """Capture the new transport and set the connected event."""
         # NB - this will return a 4-part tuple in some cases
         server, port = transport.get_extra_info('peername')[:2]
         self.logger.info('connected to statsd %s:%s', server, port)
         self.transport = transport
+        self.transport.set_protocol(self)
         self.connected.set()
 
-    def connection_lost(self, exc: typing.Optional[Exception]):
+    def connection_lost(self, exc: typing.Optional[Exception]) -> None:
         """Clear the connected event."""
         self.logger.warning('statsd server connection lost: %s', exc)
         self.connected.clear()
@@ -178,9 +186,10 @@ class StatsdProtocol:
 
 class TCPProtocol(StatsdProtocol, asyncio.Protocol):
     """StatsdProtocol implementation over a TCP/IP connection."""
+    ip_protocol = socket.IPPROTO_TCP
     transport: asyncio.WriteTransport
 
-    def eof_received(self):
+    def eof_received(self) -> None:
         self.logger.warning('received EOF from statsd server')
         self.connected.clear()
 
@@ -219,6 +228,7 @@ class TCPProtocol(StatsdProtocol, asyncio.Protocol):
 
 class UDPProtocol(StatsdProtocol, asyncio.DatagramProtocol):
     """StatsdProtocol implementation over a UDP/IP connection."""
+    ip_protocol = socket.IPPROTO_UDP
     transport: asyncio.DatagramTransport
 
     def send(self, metric: bytes) -> None:
@@ -286,18 +296,20 @@ class Processor:
 
     """
 
-    protocol: typing.Union[StatsdProtocol, None]
+    logger: logging.Logger
+    protocol: typing.Optional[StatsdProtocol]
+    queue: asyncio.Queue[bytes]
     _create_transport: typing.Callable[[], typing.Coroutine[
         typing.Any, typing.Any, typing.Tuple[asyncio.BaseTransport,
                                              StatsdProtocol]]]
 
     def __init__(self,
                  *,
-                 host,
+                 host: str,
                  port: int = 8125,
                  reconnect_sleep: float = 1.0,
                  ip_protocol: int = socket.IPPROTO_TCP,
-                 wait_timeout: float = 0.1):
+                 wait_timeout: float = 0.1) -> None:
         super().__init__()
         if not host:
             raise RuntimeError('host must be set')
@@ -314,9 +326,11 @@ class Processor:
             socket.IPPROTO_UDP: self._create_udp_transport,
         }
         try:
-            self._create_transport = transport_creators[ip_protocol]
+            factory = transport_creators[ip_protocol]
         except KeyError:
             raise RuntimeError(f'ip_protocol {ip_protocol} is not supported')
+        else:
+            self._create_transport = factory  # type: ignore
 
         self.host = host
         self.port = port
@@ -332,16 +346,15 @@ class Processor:
         self.protocol = None
         self.queue = asyncio.Queue()
 
-        self._failed_sends = []
-
     @property
     def connected(self) -> bool:
         """Is the processor connected?"""
-        if self.protocol is None:
-            return False
-        return self.protocol.connected.is_set()
+        return self.protocol is not None and self.protocol.connected.is_set()
 
-    async def run(self):
+    def enqueue(self, metric: bytes) -> None:
+        self.queue.put_nowait(metric)
+
+    async def run(self) -> None:
         """Maintains the connection and processes metric payloads."""
         self.running.set()
         self.stopped.clear()
@@ -374,7 +387,7 @@ class Processor:
         self.running.clear()
         self.stopped.set()
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop the processor.
 
         This is an asynchronous but blocking method.  It does not
@@ -399,7 +412,7 @@ class Processor:
             reuse_port=True)
         return t, typing.cast(StatsdProtocol, p)
 
-    async def _connect_if_necessary(self):
+    async def _connect_if_necessary(self) -> None:
         if self.protocol is not None:
             try:
                 await asyncio.wait_for(self.protocol.connected.wait(),
@@ -412,7 +425,8 @@ class Processor:
                 buffered_data = b''
                 if self.protocol is not None:
                     buffered_data = self.protocol.buffered_data
-                transport, self.protocol = await self._create_transport()
+                t, p = await self._create_transport()  # type: ignore[misc]
+                transport, self.protocol = t, p
                 self.protocol.buffered_data = buffered_data
                 self.logger.info('connection established to %s',
                                  transport.get_extra_info('peername'))
@@ -421,7 +435,7 @@ class Processor:
                                     self.host, self.port, error)
                 await asyncio.sleep(self._reconnect_sleep)
 
-    async def _process_metric(self):
+    async def _process_metric(self) -> None:
         try:
             metric = await asyncio.wait_for(self.queue.get(),
                                             self._wait_timeout)
@@ -432,4 +446,5 @@ class Processor:
             # it has queued metrics to send
             metric = b''
 
+        assert self.protocol is not None  # AFAICT, this cannot happen
         self.protocol.send(metric)

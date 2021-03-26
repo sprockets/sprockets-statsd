@@ -257,19 +257,19 @@ class RequestHandlerTests(AsyncTestCaseWithTimeout, testing.AsyncHTTPTestCase):
             timeout_remaining -= (time.time() - start)
 
     def parse_metric(self, metric_line: bytes) -> ParsedMetric:
-        metric_line = metric_line.decode()
-        path, _, rest = metric_line.partition(':')
+        decoded = metric_line.decode()
+        path, _, rest = decoded.partition(':')
         value, _, type_code = rest.partition('|')
         try:
-            value = float(value)
+            parsed_value = float(value)
         except ValueError:
             self.fail(f'value of {path} is not a number: value={value!r}')
-        return path, value, type_code
+        return path, parsed_value, type_code
 
     def find_metric(self, needle: str) -> ParsedMetric:
-        needle = needle.encode()
+        encoded = needle.encode()
         for line in self.statsd_server.metrics:
-            if needle in line:
+            if encoded in line:
                 return self.parse_metric(line)
         self.fail(f'failed to find metric containing {needle!r}')
 

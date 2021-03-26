@@ -2,6 +2,7 @@ import asyncio
 import logging
 import socket
 import time
+import typing
 
 import asynctest
 
@@ -110,7 +111,7 @@ class ProcessorTests(ProcessorTestCase):
 
     def test_that_processor_fails_when_host_is_none(self):
         with self.assertRaises(RuntimeError) as context:
-            statsd.Processor(host=None, port=12345)
+            statsd.Processor(host=None, port=12345)  # type: ignore[arg-type]
         self.assertIn('host', str(context.exception))
 
     async def test_starting_and_stopping_without_connecting(self):
@@ -129,7 +130,7 @@ class ProcessorTests(ProcessorTestCase):
         await self.wait_for(processor.running.wait())
 
         with self.assertLogs(processor.logger, level=logging.ERROR) as cm:
-            processor.queue.put_nowait('not-bytes')
+            processor.queue.put_nowait('not-bytes')  # type: ignore[arg-type]
             while processor.queue.qsize() > 0:
                 await asyncio.sleep(0.1)
 
@@ -189,15 +190,16 @@ class TCPProcessingTests(ProcessorTestCase):
 
     async def test_socket_closure_while_sending(self):
         state = {'first_time': True}
-        real_transport_write = self.processor.protocol.transport.write
+        protocol = typing.cast(statsd.TCPProtocol, self.processor.protocol)
+        real_transport_write = protocol.transport.write
 
-        def fake_transport_write(buffer):
+        def fake_transport_write(data):
             if state['first_time']:
                 self.processor.protocol.transport.close()
                 state['first_time'] = False
-            return real_transport_write(buffer)
+            return real_transport_write(data)
 
-        self.processor.protocol.transport.write = fake_transport_write
+        protocol.transport.write = fake_transport_write
         self.processor.queue.put_nowait(b'counter:1|c')
         await self.wait_for(self.statsd_server.message_received.acquire())
 
@@ -265,8 +267,8 @@ class ConnectorTests(ProcessorTestCase):
         await super().asyncTearDown()
 
     def assert_metrics_equal(self, recvd: bytes, path, value, type_code):
-        recvd = recvd.decode('utf-8')
-        recvd_path, _, rest = recvd.partition(':')
+        decoded = recvd.decode('utf-8')
+        recvd_path, _, rest = decoded.partition(':')
         recvd_value, _, recvd_code = rest.partition('|')
         self.assertEqual(path, recvd_path, 'metric path mismatch')
         self.assertEqual(recvd_value, str(value), 'metric value mismatch')
