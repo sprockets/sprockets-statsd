@@ -47,7 +47,7 @@ the payload.
 Tornado helpers
 ===============
 The ``sprockets_statsd.tornado`` module contains mix-in classes that make reporting metrics from your tornado_ web
-application simple.  You will need to install the ``sprockets_statsd[tornado]`` mix-in to ensure that the Tornado
+application simple.  You will need to install the ``sprockets_statsd[tornado]`` extra to ensure that the Tornado
 requirements for this library are met.
 
 .. code-block:: python
