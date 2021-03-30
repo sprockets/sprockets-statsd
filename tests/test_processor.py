@@ -376,3 +376,25 @@ class ConnectorOptionTests(ProcessorTestCase):
                 statsd.Connector(host=self.statsd_server.host, port=port)
             self.assertIn('port', str(context.exception))
             self.assertIn(repr(port), str(context.exception))
+
+    async def test_that_metrics_are_dropped_when_queue_overflows(self):
+        connector = statsd.Connector(host=self.statsd_server.host,
+                                     port=1,
+                                     max_queue_size=10)
+        await connector.start()
+        self.addCleanup(connector.stop)
+
+        # fill up the queue with incr's
+        for expected_size in range(1, connector.processor.queue.maxsize + 1):
+            connector.incr('counter')
+            self.assertEqual(connector.processor.queue.qsize(), expected_size)
+
+        # the following decr's should be ignored
+        for _ in range(10):
+            connector.decr('counter')
+            self.assertEqual(connector.processor.queue.qsize(), 10)
+
+        # make sure that only the incr's are in the queue
+        for _ in range(connector.processor.queue.qsize()):
+            metric = await connector.processor.queue.get()
+            self.assertEqual(metric, b'counter:1|c')

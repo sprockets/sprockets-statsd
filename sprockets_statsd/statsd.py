@@ -35,12 +35,14 @@ class Connector:
        sends the metric payloads.
 
     """
+    logger: logging.Logger
     processor: 'Processor'
 
     def __init__(self,
                  host: str,
                  port: int = 8125,
                  **kwargs: typing.Any) -> None:
+        self.logger = logging.getLogger(__package__).getChild('Connector')
         self.processor = Processor(host=host, port=port, **kwargs)
         self._processor_task: typing.Optional[asyncio.Task[None]] = None
 
@@ -124,7 +126,10 @@ class Connector:
 
         """
         payload = f'{path}:{value}|{type_code}'
-        self.processor.enqueue(payload.encode('utf-8'))
+        try:
+            self.processor.enqueue(payload.encode('utf-8'))
+        except asyncio.QueueFull:
+            self.logger.warning('statsd queue is full, discarding metric')
 
 
 class StatsdProtocol(asyncio.BaseProtocol):
@@ -245,6 +250,8 @@ class Processor:
 
     :param host: statsd server to send metrics to
     :param port: TCP port that the server is listening on
+    :param max_queue_size: only allow this many elements to be
+        stored in the queue before discarding metrics
     :param reconnect_sleep: number of seconds to sleep after socket
         error occurs when connecting
     :param wait_timeout: number os seconds to wait for a message to
@@ -307,8 +314,9 @@ class Processor:
                  *,
                  host: str,
                  port: int = 8125,
-                 reconnect_sleep: float = 1.0,
                  ip_protocol: int = socket.IPPROTO_TCP,
+                 max_queue_size: int = 1000,
+                 reconnect_sleep: float = 1.0,
                  wait_timeout: float = 0.1) -> None:
         super().__init__()
         if not host:
@@ -344,7 +352,7 @@ class Processor:
         self.logger = logging.getLogger(__package__).getChild('Processor')
         self.should_terminate = False
         self.protocol = None
-        self.queue = asyncio.Queue()
+        self.queue = asyncio.Queue(maxsize=max_queue_size)
 
     @property
     def connected(self) -> bool:

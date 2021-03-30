@@ -111,25 +111,17 @@ class Application(web.Application):
 
         """
         if self.statsd_connector is None:
-            statsd_settings = self.settings['statsd']
-            kwargs = {
-                'host': statsd_settings['host'],
-                'port': statsd_settings['port'],
-            }
-            if 'reconnect_sleep' in statsd_settings:
-                kwargs['reconnect_sleep'] = statsd_settings['reconnect_sleep']
-            if 'wait_timeout' in statsd_settings:
-                kwargs['wait_timeout'] = statsd_settings['wait_timeout']
-            if statsd_settings['protocol'] == 'tcp':
+            kwargs = self.settings['statsd'].copy()
+            protocol = kwargs.pop('protocol', None)
+            if protocol == 'tcp':
                 kwargs['ip_protocol'] = socket.IPPROTO_TCP
-            elif statsd_settings['protocol'] == 'udp':
+            elif protocol == 'udp':
                 kwargs['ip_protocol'] = socket.IPPROTO_UDP
             else:
-                raise RuntimeError(
-                    f'statsd configuration error:'
-                    f' {statsd_settings["protocol"]} is not a valid'
-                    f' protocol')
+                raise RuntimeError(f'statsd configuration error: {protocol} '
+                                   f'is not a valid protocol')
 
+            kwargs.pop('prefix', None)  # TODO move prefixing into Connector
             self.statsd_connector = statsd.Connector(**kwargs)
             await self.statsd_connector.start()
 
