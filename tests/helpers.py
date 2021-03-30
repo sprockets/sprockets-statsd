@@ -20,7 +20,7 @@ class StatsdServer(asyncio.DatagramProtocol, asyncio.Protocol):
         self.running = asyncio.Event()
         self.client_connected = asyncio.Semaphore(value=0)
         self.message_received = asyncio.Semaphore(value=0)
-        self.transports: list[asyncio.BaseTransport] = []
+        self.transports: typing.List[asyncio.BaseTransport] = []
 
         self._buffer = io.BytesIO()
 
@@ -34,7 +34,7 @@ class StatsdServer(asyncio.DatagramProtocol, asyncio.Protocol):
                                               self.port,
                                               reuse_port=True)
             self.server = server
-            listening_sock = typing.cast(list[socket.socket],
+            listening_sock = typing.cast(typing.List[socket.socket],
                                          server.sockets)[0]
             self.host, self.port = listening_sock.getsockname()
             self.running.set()

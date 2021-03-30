@@ -333,7 +333,7 @@ class Processor:
 
     logger: logging.Logger
     protocol: typing.Optional[StatsdProtocol]
-    queue: asyncio.Queue[bytes]
+    queue: asyncio.Queue
     _create_transport: typing.Callable[[], typing.Coroutine[
         typing.Any, typing.Any, typing.Tuple[asyncio.BaseTransport,
                                              StatsdProtocol]]]
