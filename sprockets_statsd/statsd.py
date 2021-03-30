@@ -12,6 +12,7 @@ class Connector:
     :keyword ip_protocol: IP protocol to use for the underlying
         socket -- either ``socket.IPPROTO_TCP`` for TCP or
         ``socket.IPPROTO_UDP`` for UDP sockets.
+    :keyword prefix: optional string to prepend to metric paths
     :param kwargs: additional keyword parameters are passed
         to the :class:`.Processor` initializer
 
@@ -23,10 +24,33 @@ class Connector:
     terminating to ensure that all metrics are flushed to the
     statsd server.
 
-    When the connector is *should_terminate*, metric payloads are sent by
-    calling the :meth:`.inject_metric` method.  The payloads are
-    stored in an internal queue that is consumed whenever the
+    Metrics are optionally prefixed with :attr:`prefix` before the
+    metric type prefix.  This *should* be used to prevent metrics
+    from being overwritten when multiple applications share a StatsD
+    instance.  Each metric type is also prefixed by one of the
+    following strings based on the metric type:
+
+    +-------------------+---------------+-----------+
+    | Method call       | Prefix        | Type code |
+    +-------------------+---------------+-----------+
+    | :meth:`.incr`     | ``counters.`` | ``c``     |
+    +-------------------+---------------+-----------+
+    | :meth:`.decr`     | ``counters.`` | ``c``     |
+    +-------------------+---------------+-----------+
+    | :meth:`.gauge`    | ``gauges.``   | ``g``     |
+    +-------------------+---------------+-----------+
+    | :meth:`.timing`   | ``timers.``   | ``ms``    |
+    +-------------------+---------------+-----------+
+
+    When the connector is *should_terminate*, metric payloads are
+    sent by calling the :meth:`.inject_metric` method.  The payloads
+    are stored in an internal queue that is consumed whenever the
     connection to the server is active.
+
+    .. attribute:: prefix
+       :type: str
+
+       String to prefix to all metrics *before* the metric type prefix.
 
     .. attribute:: processor
        :type: Processor
@@ -36,13 +60,17 @@ class Connector:
 
     """
     logger: logging.Logger
+    prefix: str
     processor: 'Processor'
 
     def __init__(self,
                  host: str,
                  port: int = 8125,
+                 *,
+                 prefix: str = '',
                  **kwargs: typing.Any) -> None:
         self.logger = logging.getLogger(__package__).getChild('Connector')
+        self.prefix = f'{prefix}.' if prefix else prefix
         self.processor = Processor(host=host, port=port, **kwargs)
         self._processor_task: typing.Optional[asyncio.Task[None]] = None
 
@@ -74,7 +102,7 @@ class Connector:
         :param value: amount to increment the counter by
 
         """
-        self.inject_metric(path, str(value), 'c')
+        self.inject_metric(f'counters.{path}', str(value), 'c')
 
     def decr(self, path: str, value: int = 1) -> None:
         """Decrement a counter metric.
@@ -85,7 +113,7 @@ class Connector:
         This is equivalent to ``self.incr(path, -value)``.
 
         """
-        self.inject_metric(path, str(-value), 'c')
+        self.inject_metric(f'counters.{path}', str(-value), 'c')
 
     def gauge(self, path: str, value: int, delta: bool = False) -> None:
         """Manipulate a gauge metric.
@@ -103,7 +131,7 @@ class Connector:
             payload = f'{value:+d}'
         else:
             payload = str(value)
-        self.inject_metric(path, payload, 'g')
+        self.inject_metric(f'gauges.{path}', payload, 'g')
 
     def timing(self, path: str, seconds: float) -> None:
         """Send a timer metric.
@@ -112,7 +140,7 @@ class Connector:
         :param seconds: number of **seconds** to record
 
         """
-        self.inject_metric(path, str(seconds * 1000.0), 'ms')
+        self.inject_metric(f'timers.{path}', str(seconds * 1000.0), 'ms')
 
     def inject_metric(self, path: str, value: str, type_code: str) -> None:
         """Send a metric to the statsd server.
@@ -125,7 +153,7 @@ class Connector:
         internal queue for future processing.
 
         """
-        payload = f'{path}:{value}|{type_code}'
+        payload = f'{self.prefix}{path}:{value}|{type_code}'
         try:
             self.processor.enqueue(payload.encode('utf-8'))
         except asyncio.QueueFull:

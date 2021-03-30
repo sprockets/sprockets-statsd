@@ -62,12 +62,12 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         self.unsetenv('STATSD_PREFIX')
         self.unsetenv('STATSD_PROTOCOL')
 
-        app = sprockets_statsd.tornado.Application(statsd={'prefix': None})
+        app = sprockets_statsd.tornado.Application(statsd={'prefix': ''})
         self.assertIn('statsd', app.settings)
         self.assertIsNone(app.settings['statsd']['host'],
                           'default host value should be None')
         self.assertEqual(8125, app.settings['statsd']['port'])
-        self.assertEqual(None, app.settings['statsd']['prefix'])
+        self.assertEqual('', app.settings['statsd']['prefix'])
         self.assertEqual('tcp', app.settings['statsd']['protocol'])
 
     def test_that_statsd_settings_read_from_environment(self):
@@ -217,6 +217,20 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
                          app.statsd_connector.processor._ip_protocol)
         self.run_coroutine(app.stop_statsd())
 
+    def test_disabling_statsd_prefix(self):
+        app = sprockets_statsd.tornado.Application(
+            service='my-service',
+            version='1.0.0',
+            statsd={
+                'host': 'localhost',
+                'prefix': '',
+                'protocol': 'udp',
+            },
+        )
+        self.run_coroutine(app.start_statsd())
+        self.assertEqual(app.statsd_connector.prefix, '')
+        self.run_coroutine(app.stop_statsd())
+
 
 class RequestHandlerTests(AsyncTestCaseWithTimeout, testing.AsyncHTTPTestCase):
     def setUp(self):
@@ -306,19 +320,3 @@ class RequestHandlerTests(AsyncTestCaseWithTimeout, testing.AsyncHTTPTestCase):
 
         rsp = self.fetch('/')
         self.assertEqual(200, rsp.code)
-
-    def test_handling_request_without_prefix(self):
-        self.app.settings['statsd']['prefix'] = ''
-
-        rsp = self.fetch('/')
-        self.assertEqual(200, rsp.code)
-        self.wait_for_metrics()
-
-        path, _, _ = self.find_metric('Handler.GET.200')
-        self.assertEqual('timers.Handler.GET.200', path)
-
-        path, _, _ = self.find_metric('execution-timer')
-        self.assertEqual('timers.execution-timer', path)
-
-        path, _, _ = self.find_metric('request-count')
-        self.assertEqual('counters.request-count', path)

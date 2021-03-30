@@ -121,7 +121,6 @@ class Application(web.Application):
                 raise RuntimeError(f'statsd configuration error: {protocol} '
                                    f'is not a valid protocol')
 
-            kwargs.pop('prefix', None)  # TODO move prefixing into Connector
             self.statsd_connector = statsd.Connector(**kwargs)
             await self.statsd_connector.start()
 
@@ -148,10 +147,7 @@ class RequestHandler(web.RequestHandler):
         self.statsd_connector = self.application.statsd_connector
 
     def __build_path(self, *path: typing.Any) -> str:
-        full_path = '.'.join(str(c) for c in path)
-        if self.settings.get('statsd', {}).get('prefix', ''):
-            return f'{self.settings["statsd"]["prefix"]}.{full_path}'
-        return full_path
+        return '.'.join(str(c) for c in path)
 
     def record_timing(self, secs: float, *path: typing.Any) -> None:
         """Record the duration.
@@ -161,8 +157,7 @@ class RequestHandler(web.RequestHandler):
 
         """
         if self.statsd_connector is not None:
-            self.statsd_connector.timing(self.__build_path('timers', *path),
-                                         secs)
+            self.statsd_connector.timing(self.__build_path(*path), secs)
 
     def increase_counter(self, *path: typing.Any, amount: int = 1) -> None:
         """Adjust a counter.
@@ -173,8 +168,7 @@ class RequestHandler(web.RequestHandler):
 
         """
         if self.statsd_connector is not None:
-            self.statsd_connector.incr(self.__build_path('counters', *path),
-                                       amount)
+            self.statsd_connector.incr(self.__build_path(*path), amount)
 
     @contextlib.contextmanager
     def execution_timer(

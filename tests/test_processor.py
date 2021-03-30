@@ -225,8 +225,9 @@ class UDPProcessingTests(ProcessorTestCase):
         await self.wait_for(self.statsd_server.message_received.acquire())
         await self.wait_for(self.statsd_server.message_received.acquire())
 
-        self.assertEqual(self.statsd_server.metrics[0], b'counter:1|c')
-        self.assertEqual(self.statsd_server.metrics[1], b'timer:1.0|ms')
+        self.assertEqual(self.statsd_server.metrics[0],
+                         b'counters.counter:1|c')
+        self.assertEqual(self.statsd_server.metrics[1], b'timers.timer:1.0|ms')
 
     async def test_that_client_sends_to_new_server(self):
         self.statsd_server.close()
@@ -240,7 +241,8 @@ class UDPProcessingTests(ProcessorTestCase):
 
         self.connector.incr('should.be.recvd')
         await self.wait_for(self.statsd_server.message_received.acquire())
-        self.assertEqual(self.statsd_server.metrics[0], b'should.be.recvd:1|c')
+        self.assertEqual(self.statsd_server.metrics[0],
+                         b'counters.should.be.recvd:1|c')
 
     async def test_that_client_handles_socket_closure(self):
         self.connector.processor.protocol.transport.close()
@@ -249,7 +251,8 @@ class UDPProcessingTests(ProcessorTestCase):
 
         self.connector.incr('should.be.recvd')
         await self.wait_for(self.statsd_server.message_received.acquire())
-        self.assertEqual(self.statsd_server.metrics[0], b'should.be.recvd:1|c')
+        self.assertEqual(self.statsd_server.metrics[0],
+                         b'counters.should.be.recvd:1|c')
 
 
 class ConnectorTests(ProcessorTestCase):
@@ -278,22 +281,22 @@ class ConnectorTests(ProcessorTestCase):
         self.connector.incr('simple.counter')
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assert_metrics_equal(self.statsd_server.metrics[-1],
-                                  'simple.counter', 1, 'c')
+                                  'counters.simple.counter', 1, 'c')
 
         self.connector.incr('simple.counter', 10)
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assert_metrics_equal(self.statsd_server.metrics[-1],
-                                  'simple.counter', 10, 'c')
+                                  'counters.simple.counter', 10, 'c')
 
         self.connector.decr('simple.counter')
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assert_metrics_equal(self.statsd_server.metrics[-1],
-                                  'simple.counter', -1, 'c')
+                                  'counters.simple.counter', -1, 'c')
 
         self.connector.decr('simple.counter', 10)
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assert_metrics_equal(self.statsd_server.metrics[-1],
-                                  'simple.counter', -10, 'c')
+                                  'counters.simple.counter', -10, 'c')
 
     async def test_adjusting_gauge(self):
         self.connector.gauge('simple.gauge', 100)
@@ -303,18 +306,18 @@ class ConnectorTests(ProcessorTestCase):
             await self.wait_for(self.statsd_server.message_received.acquire())
 
         self.assert_metrics_equal(self.statsd_server.metrics[0],
-                                  'simple.gauge', '100', 'g')
+                                  'gauges.simple.gauge', '100', 'g')
         self.assert_metrics_equal(self.statsd_server.metrics[1],
-                                  'simple.gauge', '-10', 'g')
+                                  'gauges.simple.gauge', '-10', 'g')
         self.assert_metrics_equal(self.statsd_server.metrics[2],
-                                  'simple.gauge', '+10', 'g')
+                                  'gauges.simple.gauge', '+10', 'g')
 
     async def test_sending_timer(self):
         secs = 12.34
         self.connector.timing('simple.timer', secs)
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assert_metrics_equal(self.statsd_server.metrics[0],
-                                  'simple.timer', 12340.0, 'ms')
+                                  'timers.simple.timer', 12340.0, 'ms')
 
     async def test_that_queued_metrics_are_drained(self):
         # The easiest way to test that the internal metrics queue
@@ -348,7 +351,7 @@ class ConnectorTests(ProcessorTestCase):
         await self.wait_for(self.statsd_server.client_connected.acquire())
         for value in range(50):
             await self.wait_for(self.statsd_server.message_received.acquire())
-            self.assertEqual(f'counter:{value}|c'.encode(),
+            self.assertEqual(f'counters.counter:{value}|c'.encode(),
                              self.statsd_server.metrics.pop(0))
 
 
@@ -397,4 +400,4 @@ class ConnectorOptionTests(ProcessorTestCase):
         # make sure that only the incr's are in the queue
         for _ in range(connector.processor.queue.qsize()):
             metric = await connector.processor.queue.get()
-            self.assertEqual(metric, b'counter:1|c')
+            self.assertEqual(metric, b'counters.counter:1|c')
