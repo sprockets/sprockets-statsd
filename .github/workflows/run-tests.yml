@@ -33,16 +33,15 @@ jobs:
         run: |
           coverage run -m unittest
           coverage report
-          coverage xml
+          coverage xml -o ./coverage.xml
       - name: Generate documentation
         run: |
           sphinx-build -b html -W --no-color docs build/sphinx/html
-# TODO
-#      - name: Upload coverage
-#        uses: codecov/codecov-action@v1.0.2
-#        if: github.event_name == 'push' && github.repository == 'sprockets/sprockets-statsd' && github.branch == 'main'
-#        with:
-#          token: ${{ secrets.CODECOV_TOKEN }}
-#          file: build/coverage.xml
-#          flags: unittests
-#          fail_ci_if_error: true
+      - name: Upload coverage
+        uses: codecov/codecov-action@v1.0.2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml
+          flags: unittests
+          env_vars: OS,PYTHON
+          fail_ci_if_error: true
