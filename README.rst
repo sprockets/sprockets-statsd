@@ -1,5 +1,10 @@
 Asynchronously send metrics to a statsd_ instance.
 
+|build| |coverage| |source|
+
+.. COMMENTED OUT FOR THE TIME BEING
+   |docs| |download| |license|
+
 This library provides connectors to send metrics to a statsd_ instance using either TCP or UDP.
 
 .. code-block:: python
@@ -115,3 +120,16 @@ not connected to the server and will be sent in the order received when the task
 
 .. _statsd: https://github.com/statsd/statsd/
 .. _tornado: https://tornadoweb.org/
+
+.. |build| image:: https://img.shields.io/github/workflow/status/sprockets/sprockets-statsd/Testing/main?style=social
+   :target: https://github.com/sprockets/sprockets-statsd/actions/workflows/run-tests.yml
+.. |coverage| image:: https://img.shields.io/codecov/c/github/sprockets/sprockets-statsd?style=social
+   :target: https://app.codecov.io/gh/sprockets/sprockets-statsd
+.. |docs| image:: https://img.shields.io/readthedocs/sprockets-statsd.svg?style=social
+   :target: https://sprockets-statsd.readthedocs.io/en/latest/?badge=latest
+.. |download| image:: https://img.shields.io/pypi/pyversions/sprockets-statsd.svg?style=social
+   :target: https://pypi.org/project/sprockets-statsd/
+.. |license| image:: https://img.shields.io/pypi/l/sprockets-statsd.svg?style=social
+   :target: https://github.com/sprockets/sprockets-statsd/blob/master/LICENSE.txt
+.. |source| image:: https://img.shields.io/badge/source-github.com-green.svg?style=social
+   :target: https://github.com/sprockets/sprockets-statsd

@@ -34,14 +34,11 @@ jobs:
           coverage run -m unittest
           coverage report
           coverage xml -o ./coverage.xml
-      - name: Generate documentation
-        run: |
-          sphinx-build -b html -W --no-color docs build/sphinx/html
       - name: Upload coverage
-        uses: codecov/codecov-action@v1.0.2
+        uses: codecov/codecov-action@v1.3.2
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{secrets.CODECOV_TOKEN}}
           file: ./coverage.xml
           flags: unittests
-          env_vars: OS,PYTHON
           fail_ci_if_error: true
+          verbose: true
