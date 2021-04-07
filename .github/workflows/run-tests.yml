@@ -43,7 +43,7 @@ jobs:
           flags: unittests
           fail_ci_if_error: true
       - name: Save coverage report
-        if: ${{ matrix.python-version == "3.9" }}
+        if: ${{ matrix.python-version == '3.9' }}
         uses: actions/upload-artifact@v2
         with:
           name: coverage.xml
