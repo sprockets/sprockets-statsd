@@ -1,6 +1,6 @@
 Asynchronously send metrics to a statsd_ instance.
 
-|build| |coverage| |source|
+|build| |coverage| |sonar| |source|
 
 .. COMMENTED OUT FOR THE TIME BEING
    |docs| |download| |license|
@@ -131,5 +131,7 @@ not connected to the server and will be sent in the order received when the task
    :target: https://pypi.org/project/sprockets-statsd/
 .. |license| image:: https://img.shields.io/pypi/l/sprockets-statsd.svg?style=social
    :target: https://github.com/sprockets/sprockets-statsd/blob/master/LICENSE.txt
+.. |sonar| image:: https://img.shields.io/sonar/quality_gate/sprockets_sprockets-statsd?server=https%3A%2F%2Fsonarcloud.io&style=social
+   :target: https://sonarcloud.io/dashboard?id=sprockets_sprockets-statsd
 .. |source| image:: https://img.shields.io/badge/source-github.com-green.svg?style=social
    :target: https://github.com/sprockets/sprockets-statsd
