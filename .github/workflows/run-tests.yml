@@ -8,6 +8,7 @@ on:
 
 jobs:
   test:
+    name: Tests and style checks
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -34,21 +35,33 @@ jobs:
           coverage run -m unittest
           coverage report
           coverage xml -o ./coverage.xml
-      - name: Upload coverage
+      - name: Send coverage to codecov.io
         uses: codecov/codecov-action@v1.3.2
         with:
           token: ${{secrets.CODECOV_TOKEN}}
           file: ./coverage.xml
           flags: unittests
           fail_ci_if_error: true
-          verbose: true
+      - name: Save coverage report
+        if: ${{ matrix.python-version == '3.9' }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: coverage.xml
+          path: ./coverage.xml
+
   sonarcloud:
     name: SonarCloud
     runs-on: ubuntu-latest
+    if: ${{ github.event == 'push' && github.ref == 'refs/heads/main' }}
+    needs: test
     steps:
       - uses: actions/checkout@v2
         with:
           fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+      - name: Download coverage report
+        uses: actions/download-artifact@v2
+        with:
+          name: coverage.xml
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master
         env:
