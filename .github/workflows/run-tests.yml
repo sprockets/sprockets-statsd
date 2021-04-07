@@ -52,7 +52,8 @@ jobs:
   sonarcloud:
     name: SonarCloud
     runs-on: ubuntu-latest
-    if: ${{ secrets.SONAR_TOKEN }}
+    if: ${{ github.event == 'push' && github.ref == 'refs/heads/main' }}
+    needs: test
     steps:
       - uses: actions/checkout@v2
         with:
