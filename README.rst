@@ -1,6 +1,6 @@
 Asynchronously send metrics to a statsd_ instance.
 
-|build| |coverage| |sonar| |source|
+|build| |coverage| |sonar| |docs| |source|
 
 .. COMMENTED OUT FOR THE TIME BEING
    |docs| |download| |license|
