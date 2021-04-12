@@ -16,5 +16,11 @@ intersphinx_mapping = {
     'tornado': ('https://www.tornadoweb.org/en/branch6.0/', None),
 }
 
+# https://www.sphinx-doc.org/en/master/usage/extensions/extlinks.html
+extensions.append('sphinx.ext.extlinks')
+extlinks = {
+    'tag': ("https://github.com/sprockets/sprockets-statsd/compare/%s", "%s"),
+}
+
 # https://pypi.org/project/sphinx-autodoc-typehints/
 extensions.append('sphinx_autodoc_typehints')

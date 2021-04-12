@@ -6,6 +6,7 @@ import typing
 
 from tornado import testing, web
 
+import sprockets_statsd.statsd
 import sprockets_statsd.tornado
 from tests import helpers
 
@@ -49,21 +50,22 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
             else:
                 os.environ.pop(name, None)
 
-    def setenv(self, name, value):
-        self._environ.setdefault(name, os.environ.pop(name, None))
-        os.environ[name] = value
+    def setenv(self, **variables):
+        for name, value in variables.items():
+            self._environ.setdefault(name, os.environ.pop(name, None))
+            os.environ[name] = value
 
-    def unsetenv(self, name):
-        self._environ.setdefault(name, os.environ.pop(name, None))
+    def unsetenv(self, *names):
+        for name in names:
+            self._environ.setdefault(name, os.environ.pop(name, None))
 
     def test_statsd_setting_defaults(self):
-        self.unsetenv('STATSD_HOST')
-        self.unsetenv('STATSD_PORT')
-        self.unsetenv('STATSD_PREFIX')
-        self.unsetenv('STATSD_PROTOCOL')
+        self.unsetenv('STATSD_ENABLED', 'STATSD_HOST', 'STATSD_PORT',
+                      'STATSD_PREFIX', 'STATSD_PROTOCOL')
 
         app = sprockets_statsd.tornado.Application(statsd={'prefix': ''})
         self.assertIn('statsd', app.settings)
+        self.assertTrue(app.settings['statsd']['enabled'])
         self.assertIsNone(app.settings['statsd']['host'],
                           'default host value should be None')
         self.assertEqual(8125, app.settings['statsd']['port'])
@@ -71,13 +73,15 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         self.assertEqual('tcp', app.settings['statsd']['protocol'])
 
     def test_that_statsd_settings_read_from_environment(self):
-        self.setenv('STATSD_HOST', 'statsd')
-        self.setenv('STATSD_PORT', '5218')
-        self.setenv('STATSD_PREFIX', 'my-service')
-        self.setenv('STATSD_PROTOCOL', 'udp')
+        self.setenv(STATSD_ENABLED='no',
+                    STATSD_HOST='statsd',
+                    STATSD_PORT='5218',
+                    STATSD_PREFIX='my-service',
+                    STATSD_PROTOCOL='udp')
 
         app = sprockets_statsd.tornado.Application()
         self.assertIn('statsd', app.settings)
+        self.assertFalse(app.settings['statsd']['enabled'])
         self.assertEqual('statsd', app.settings['statsd']['host'])
         self.assertEqual(5218, app.settings['statsd']['port'])
         self.assertEqual('my-service', app.settings['statsd']['prefix'])
@@ -99,18 +103,22 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
                          app.settings['statsd']['prefix'])
 
     def test_overridden_settings(self):
-        self.setenv('STATSD_HOST', 'statsd')
-        self.setenv('STATSD_PORT', '9999')
-        self.setenv('STATSD_PREFIX', 'service')
-        self.setenv('STATSD_PROTOCOL', 'tcp')
+        self.setenv(STATSD_ENABLED='0',
+                    STATSD_HOST='statsd',
+                    STATSD_PORT='9999',
+                    STATSD_PREFIX='service',
+                    STATSD_PROTOCOL='tcp')
+
         app = sprockets_statsd.tornado.Application(
             statsd={
+                'enabled': 'true',
                 'host': 'statsd.example.com',
                 'port': 5218,
                 'prefix': 'myapp',
                 'protocol': 'udp',
             })
         self.assertEqual('statsd.example.com', app.settings['statsd']['host'])
+        self.assertTrue(app.settings['statsd']['enabled'])
         self.assertEqual(5218, app.settings['statsd']['port'])
         self.assertEqual('myapp', app.settings['statsd']['prefix'])
         self.assertEqual('udp', app.settings['statsd']['protocol'])
@@ -230,6 +238,21 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
         self.run_coroutine(app.start_statsd())
         self.assertEqual(app.statsd_connector.prefix, '')
         self.run_coroutine(app.stop_statsd())
+
+    def test_disabling_statsd_connector(self):
+        app = sprockets_statsd.tornado.Application(
+            environment='development',
+            service='my-service',
+            version='1.0.0',
+            statsd={
+                'enabled': 'no',
+                'host': 'localhost',
+            },
+        )
+        self.run_coroutine(app.start_statsd())
+        self.assertIsNotNone(app.statsd_connector)
+        self.assertIsInstance(app.statsd_connector,
+                              sprockets_statsd.statsd.AbstractConnector)
 
 
 class RequestHandlerTests(AsyncTestCaseWithTimeout, testing.AsyncHTTPTestCase):
