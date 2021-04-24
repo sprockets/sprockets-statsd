@@ -3,7 +3,10 @@ import os
 import socket
 import time
 import typing
+import unittest.mock
 
+import sprockets.http.app
+import sprockets.http.testing
 from tornado import testing, web
 
 import sprockets_statsd.statsd
@@ -255,30 +258,30 @@ class ApplicationTests(AsyncTestCaseWithTimeout):
                               sprockets_statsd.statsd.AbstractConnector)
 
 
-class RequestHandlerTests(AsyncTestCaseWithTimeout, testing.AsyncHTTPTestCase):
-    def setUp(self):
-        super().setUp()
-        self.statsd_server = helpers.StatsdServer(socket.IPPROTO_TCP)
-        self.io_loop.spawn_callback(self.statsd_server.run)
-        self.run_coroutine(self.statsd_server.wait_running())
+class StatsdTestCase(AsyncTestCaseWithTimeout, testing.AsyncHTTPTestCase):
+    Application = web.Application
 
-        self.app.settings['statsd'].update({
-            'host': self.statsd_server.host,
-            'port': self.statsd_server.port,
-        })
-        self.run_coroutine(self.app.start_statsd())
+    def setUp(self):
+        self.statsd_server = None
+        super().setUp()
 
     def tearDown(self):
-        self.run_coroutine(self.app.stop_statsd())
-        self.statsd_server.close()
-        self.run_coroutine(self.statsd_server.wait_closed())
+        if self.statsd_server is not None:
+            self.statsd_server.close()
+            self.run_coroutine(self.statsd_server.wait_closed())
         super().tearDown()
 
     def get_app(self):
-        self.app = Application(statsd={
-            'prefix': 'applications.service',
-            'protocol': 'tcp',
-        })
+        self.statsd_server = helpers.StatsdServer(socket.IPPROTO_TCP)
+        self.io_loop.spawn_callback(self.statsd_server.run)
+        self.run_coroutine(self.statsd_server.wait_running())
+        self.app = self.Application(shutdown_limit=0.5,
+                                    statsd={
+                                        'host': self.statsd_server.host,
+                                        'port': self.statsd_server.port,
+                                        'prefix': 'applications.service',
+                                        'protocol': 'tcp',
+                                    })
         return self.app
 
     def wait_for_metrics(self, metric_count=3):
@@ -309,6 +312,19 @@ class RequestHandlerTests(AsyncTestCaseWithTimeout, testing.AsyncHTTPTestCase):
             if encoded in line:
                 return self.parse_metric(line)
         self.fail(f'failed to find metric containing {needle!r}')
+
+
+class RequestHandlerTests(StatsdTestCase, AsyncTestCaseWithTimeout,
+                          testing.AsyncHTTPTestCase):
+    Application = Application
+
+    def setUp(self):
+        super().setUp()
+        self.run_coroutine(self.app.start_statsd())
+
+    def tearDown(self):
+        self.run_coroutine(self.app.stop_statsd())
+        super().tearDown()
 
     def test_the_request_metric_is_sent_last(self):
         rsp = self.fetch('/')
@@ -343,3 +359,37 @@ class RequestHandlerTests(AsyncTestCaseWithTimeout, testing.AsyncHTTPTestCase):
 
         rsp = self.fetch('/')
         self.assertEqual(200, rsp.code)
+
+
+class SprocketsHttpInteropTests(StatsdTestCase, AsyncTestCaseWithTimeout,
+                                sprockets.http.testing.SprocketsHttpTestCase):
+    class Application(sprockets_statsd.tornado.Application,
+                      sprockets.http.app.Application):
+        def __init__(self, **settings):
+            super().__init__([web.url('/', Handler)], **settings)
+
+    def setUp(self):
+        super().setUp()
+        self.let_callbacks_run()
+
+    def let_callbacks_run(self):
+        self.io_loop.run_sync(lambda: asyncio.sleep(0))
+
+    def test_that_callbacks_are_installed(self):
+        self.assertIn(self.app.start_statsd, self.app.on_start_callbacks)
+        self.assertIn(self.app.stop_statsd, self.app.on_shutdown_callbacks)
+
+    def test_that_statsd_connector_is_enabled(self):
+        # verifies that the start callback actually runs correctly.
+        self.assertIsNotNone(self.app.statsd_connector,
+                             'statsd_connecter was never created')
+
+    def test_that_misconfiguration_stops_application(self):
+        another_app = self.Application(statsd={
+            'host': '',
+            'prefix': 'whatever',
+        })
+        another_app.stop = unittest.mock.Mock(wraps=another_app.stop)
+        another_app.start(self.io_loop)
+        self.let_callbacks_run()
+        another_app.stop.assert_called_once_with(self.io_loop)
