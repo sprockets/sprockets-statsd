@@ -1,5 +1,7 @@
-`0.0.1`_ (08-Apr-2021)
-----------------------
-- support for sending counters & timers to statsd over a TCP or UDP socket
+:tag:`Next release <0.0.1...main>`
+----------------------------------
+- Added :envvar:`STATSD_ENABLED` environment variable to disable the Tornado integration
 
-.. _0.0.1: https://github.com/sprockets/sprockets-statsd/compare/832f8af7...0.0.1
+:tag:`0.0.1 <832f8af7...0.0.1>` (08-Apr-2021)
+---------------------------------------------
+- Simple support for sending counters & timers to statsd over a TCP or UDP socket

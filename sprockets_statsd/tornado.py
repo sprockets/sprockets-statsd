@@ -13,7 +13,7 @@ class Application(web.Application):
     """Mix this into your application to add a statsd connection.
 
     .. attribute:: statsd_connector
-       :type: sprockets_statsd.statsd.Connector
+       :type: sprockets_statsd.statsd.AbstractConnector
 
        Connection to the StatsD server that is set between calls
        to :meth:`.start_statsd` and :meth:`.stop_statsd`.
@@ -21,6 +21,8 @@ class Application(web.Application):
     This mix-in is configured by the ``statsd`` settings key.  The
     value is a dictionary with the following keys.
 
+    +-------------------+---------------------------------------------+
+    | enabled           | should the statsd connector be enabled?     |
     +-------------------+---------------------------------------------+
     | host              | the statsd host to send metrics to          |
     +-------------------+---------------------------------------------+
@@ -37,6 +39,13 @@ class Application(web.Application):
     |                   | arrive on the queue before verifying the    |
     |                   | connection                                  |
     +-------------------+---------------------------------------------+
+
+    **enabled** defaults to the :envvar:`STATSD_ENABLED` environment
+    variable coerced to a :class:`bool`.  If this variable is not set,
+    then the statsd connector *WILL BE* enabled.  Set this to a *falsy*
+    value to disable the connector.  The following values are considered
+    *truthy*: a non-zero integer or a case-insensitive match of "on",
+    "t", "true", or "yes".  All other values are considered *falsy*.
 
     **host** defaults to the :envvar:`STATSD_HOST` environment variable.
     If this value is not set, then the statsd connector *WILL NOT* be
@@ -72,10 +81,12 @@ class Application(web.Application):
     processor quickly responds to connection faults.
 
     """
-    statsd_connector: typing.Optional[statsd.Connector]
+    statsd_connector: typing.Optional[statsd.AbstractConnector]
 
     def __init__(self, *args: typing.Any, **settings: typing.Any):
         statsd_settings = settings.setdefault('statsd', {})
+        statsd_settings.setdefault('enabled',
+                                   os.environ.get('STATSD_ENABLED', 'yes'))
         statsd_settings.setdefault('host', os.environ.get('STATSD_HOST'))
         statsd_settings.setdefault('port',
                                    os.environ.get('STATSD_PORT', '8125'))
@@ -98,6 +109,8 @@ class Application(web.Application):
 
         super().__init__(*args, **settings)
 
+        self.settings['statsd']['enabled'] = _parse_bool(
+            self.settings['statsd']['enabled'])
         self.settings['statsd']['port'] = int(self.settings['statsd']['port'])
         self.statsd_connector = None
 
@@ -111,17 +124,22 @@ class Application(web.Application):
 
         """
         if self.statsd_connector is None:
-            kwargs = self.settings['statsd'].copy()
-            protocol = kwargs.pop('protocol', None)
-            if protocol == 'tcp':
-                kwargs['ip_protocol'] = socket.IPPROTO_TCP
-            elif protocol == 'udp':
-                kwargs['ip_protocol'] = socket.IPPROTO_UDP
+            if not self.settings['statsd']['enabled']:
+                self.statsd_connector = statsd.AbstractConnector()
             else:
-                raise RuntimeError(f'statsd configuration error: {protocol} '
-                                   f'is not a valid protocol')
+                kwargs = self.settings['statsd'].copy()
+                kwargs.pop('enabled', None)  # consume this one
+                protocol = kwargs.pop('protocol', None)
+                if protocol == 'tcp':
+                    kwargs['ip_protocol'] = socket.IPPROTO_TCP
+                elif protocol == 'udp':
+                    kwargs['ip_protocol'] = socket.IPPROTO_UDP
+                else:
+                    raise RuntimeError(
+                        f'statsd configuration error: {protocol} is not '
+                        f'a valid protocol')
+                self.statsd_connector = statsd.Connector(**kwargs)
 
-            self.statsd_connector = statsd.Connector(**kwargs)
             await self.statsd_connector.start()
 
     async def stop_statsd(self) -> None:
@@ -195,3 +213,10 @@ class RequestHandler(web.RequestHandler):
         self.record_timing(self.request.request_time(),
                            self.__class__.__name__, self.request.method,
                            self.get_status())
+
+
+def _parse_bool(value: str) -> bool:
+    try:
+        return int(value) != 0
+    except ValueError:
+        return value.lower() in {'true', 't', 'yes', 'on'}

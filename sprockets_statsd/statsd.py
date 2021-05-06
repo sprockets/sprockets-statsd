@@ -4,7 +4,71 @@ import socket
 import typing
 
 
-class Connector:
+class AbstractConnector:
+    """StatsD connector that does not send metrics or connect.
+
+    Use this connector when you want to maintain the application
+    interface without doing any real work.
+
+    """
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    def inject_metric(self, path: str, value: str, type_code: str) -> None:
+        pass
+
+    def incr(self, path: str, value: int = 1) -> None:
+        """Increment a counter metric.
+
+        :param path: counter to increment
+        :param value: amount to increment the counter by
+
+        """
+        self.inject_metric(f'counters.{path}', str(value), 'c')
+
+    def decr(self, path: str, value: int = 1) -> None:
+        """Decrement a counter metric.
+
+        :param path: counter to decrement
+        :param value: amount to decrement the counter by
+
+        This is equivalent to ``self.incr(path, -value)``.
+
+        """
+        self.inject_metric(f'counters.{path}', str(-value), 'c')
+
+    def gauge(self, path: str, value: int, delta: bool = False) -> None:
+        """Manipulate a gauge metric.
+
+        :param path: gauge to adjust
+        :param value: value to send
+        :param delta: is this an adjustment of the gauge?
+
+        If the `delta` parameter is ``False`` (or omitted), then
+        `value` is the new value to set the gauge to.  Otherwise,
+        `value` is an adjustment for the current gauge.
+
+        """
+        if delta:
+            payload = f'{value:+d}'
+        else:
+            payload = str(value)
+        self.inject_metric(f'gauges.{path}', payload, 'g')
+
+    def timing(self, path: str, seconds: float) -> None:
+        """Send a timer metric.
+
+        :param path: timer to append a value to
+        :param seconds: number of **seconds** to record
+
+        """
+        self.inject_metric(f'timers.{path}', str(seconds * 1000.0), 'ms')
+
+
+class Connector(AbstractConnector):
     """Sends metrics to a statsd server.
 
     :param host: statsd server to send metrics to
@@ -69,6 +133,7 @@ class Connector:
                  *,
                  prefix: str = '',
                  **kwargs: typing.Any) -> None:
+        super().__init__()
         self.logger = logging.getLogger(__package__).getChild('Connector')
         self.prefix = f'{prefix}.' if prefix else prefix
         self.processor = Processor(host=host, port=port, **kwargs)
@@ -94,53 +159,6 @@ class Connector:
 
         """
         await self.processor.stop()
-
-    def incr(self, path: str, value: int = 1) -> None:
-        """Increment a counter metric.
-
-        :param path: counter to increment
-        :param value: amount to increment the counter by
-
-        """
-        self.inject_metric(f'counters.{path}', str(value), 'c')
-
-    def decr(self, path: str, value: int = 1) -> None:
-        """Decrement a counter metric.
-
-        :param path: counter to decrement
-        :param value: amount to decrement the counter by
-
-        This is equivalent to ``self.incr(path, -value)``.
-
-        """
-        self.inject_metric(f'counters.{path}', str(-value), 'c')
-
-    def gauge(self, path: str, value: int, delta: bool = False) -> None:
-        """Manipulate a gauge metric.
-
-        :param path: gauge to adjust
-        :param value: value to send
-        :param delta: is this an adjustment of the gauge?
-
-        If the `delta` parameter is ``False`` (or omitted), then
-        `value` is the new value to set the gauge to.  Otherwise,
-        `value` is an adjustment for the current gauge.
-
-        """
-        if delta:
-            payload = f'{value:+d}'
-        else:
-            payload = str(value)
-        self.inject_metric(f'gauges.{path}', payload, 'g')
-
-    def timing(self, path: str, seconds: float) -> None:
-        """Send a timer metric.
-
-        :param path: timer to append a value to
-        :param seconds: number of **seconds** to record
-
-        """
-        self.inject_metric(f'timers.{path}', str(seconds * 1000.0), 'ms')
 
     def inject_metric(self, path: str, value: str, type_code: str) -> None:
         """Send a metric to the statsd server.
