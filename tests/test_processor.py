@@ -378,7 +378,7 @@ class ConnectorTests(ProcessorTestCase):
 
         # then overflow it a bunch of times
         overflow_count = self.connector._enqueue_log_guard.threshold * 5
-        for value in range(overflow_count):
+        for _ in range(overflow_count):
             self.connector.incr('counter')
         self.assertLess(self.connector.logger.warning.call_count,
                         overflow_count)
