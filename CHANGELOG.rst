@@ -1,5 +1,5 @@
-:tag:`Next release <0.0.1...main>`
-----------------------------------
+:tag:`0.1.0 <0.0.1...0.1.0>` (10-May-2021)
+------------------------------------------
 - Added :envvar:`STATSD_ENABLED` environment variable to disable the Tornado integration
 - Tornado application mixin automatically installs start/stop hooks if the application
   quacks like a ``sprockets.http.app.Application``.
