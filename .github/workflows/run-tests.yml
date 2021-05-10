@@ -15,6 +15,8 @@ jobs:
         python-version: [3.7, 3.8, 3.9]
     steps:
       - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0  # sonar wants a "deep" clone
       - name: Install python ${{ matrix.python-version }}
         uses: actions/setup-python@v2
         with:
@@ -42,6 +44,12 @@ jobs:
           file: ./coverage.xml
           flags: unittests
           fail_ci_if_error: true
+      - name: Run sonarqube scan
+        if: ${{ matrix.python-version == '3.9' }}
+        uses: SonarSource/sonarcloud-github-action@v1.3
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          SONAR_TOKEN: ${{secrets.SONAR_TOKEN}}
       - name: Save coverage report
         if: ${{ matrix.python-version == '3.9' }}
         uses: actions/upload-artifact@v2
