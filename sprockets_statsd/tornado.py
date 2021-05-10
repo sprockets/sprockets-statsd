@@ -1,10 +1,11 @@
 import contextlib
+import logging
 import os
 import socket
 import time
 import typing
 
-from tornado import web
+from tornado import ioloop, web
 
 from sprockets_statsd import statsd
 
@@ -114,7 +115,13 @@ class Application(web.Application):
         self.settings['statsd']['port'] = int(self.settings['statsd']['port'])
         self.statsd_connector = None
 
-    async def start_statsd(self) -> None:
+        try:
+            self.on_start_callbacks.append(self.start_statsd)
+            self.on_shutdown_callbacks.append(self.stop_statsd)
+        except AttributeError:
+            pass
+
+    async def start_statsd(self, *_) -> None:
         """Start the connector during startup.
 
         Call this method during application startup to enable the statsd
@@ -124,7 +131,9 @@ class Application(web.Application):
 
         """
         if self.statsd_connector is None:
+            logger = self.__get_logger()
             if not self.settings['statsd']['enabled']:
+                logger.info('statsd connector is disabled by configuration')
                 self.statsd_connector = statsd.AbstractConnector()
             else:
                 kwargs = self.settings['statsd'].copy()
@@ -135,14 +144,20 @@ class Application(web.Application):
                 elif protocol == 'udp':
                     kwargs['ip_protocol'] = socket.IPPROTO_UDP
                 else:
-                    raise RuntimeError(
+                    return self.__handle_fatal_error(
                         f'statsd configuration error: {protocol} is not '
                         f'a valid protocol')
-                self.statsd_connector = statsd.Connector(**kwargs)
+
+                logger.info('creating %s statsd connector', protocol.upper())
+                try:
+                    self.statsd_connector = statsd.Connector(**kwargs)
+                except RuntimeError as error:
+                    return self.__handle_fatal_error(
+                        'statsd.Connector failed to start', error)
 
             await self.statsd_connector.start()
 
-    async def stop_statsd(self) -> None:
+    async def stop_statsd(self, *_) -> None:
         """Stop the connector during shutdown.
 
         If the connector was started, then this method will gracefully
@@ -153,6 +168,26 @@ class Application(web.Application):
         if self.statsd_connector is not None:
             await self.statsd_connector.stop()
             self.statsd_connector = None
+
+    def __handle_fatal_error(self,
+                             message: str,
+                             exc: typing.Optional[Exception] = None):
+        logger = self.__get_logger()
+        if exc is not None:
+            logger.exception('%s', message)
+        else:
+            logger.error('%s', message)
+        if hasattr(self, 'stop'):
+            self.stop(ioloop.IOLoop.current())
+        else:
+            raise RuntimeError(message)
+
+    def __get_logger(self) -> logging.Logger:
+        try:
+            return getattr(self, 'logger')
+        except AttributeError:
+            return logging.getLogger(__package__).getChild(
+                'tornado.Application')
 
 
 class RequestHandler(web.RequestHandler):

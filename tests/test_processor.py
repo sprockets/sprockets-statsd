@@ -3,6 +3,7 @@ import logging
 import socket
 import time
 import typing
+import unittest.mock
 
 import asynctest
 
@@ -203,6 +204,17 @@ class TCPProcessingTests(ProcessorTestCase):
         self.processor.queue.put_nowait(b'counter:1|c')
         await self.wait_for(self.statsd_server.message_received.acquire())
 
+    async def test_that_disconnected_logging_is_throttled(self):
+        self.statsd_server.close()
+        await self.statsd_server.wait_closed()
+
+        self.processor.logger = unittest.mock.Mock()
+        self.processor._connect_log_guard.threshold = 10
+        self.processor._reconnect_sleep = 0
+        while self.processor._connect_log_guard.counter < (20 + 1):
+            await asyncio.sleep(0)
+        self.assertLess(self.processor.logger.warning.call_count, 20)
+
 
 class UDPProcessingTests(ProcessorTestCase):
     ip_protocol = socket.IPPROTO_UDP
@@ -353,6 +365,23 @@ class ConnectorTests(ProcessorTestCase):
             await self.wait_for(self.statsd_server.message_received.acquire())
             self.assertEqual(f'counters.counter:{value}|c'.encode(),
                              self.statsd_server.metrics.pop(0))
+
+    async def test_that_queue_full_logging_is_throttled(self):
+        await self.connector.processor.stop()
+
+        self.connector.logger = unittest.mock.Mock()
+        self.connector._enqueue_log_guard.threshold = 10
+
+        # fill up the queue
+        for _ in range(self.connector.processor.queue.maxsize):
+            self.connector.incr('counter')
+
+        # then overflow it a bunch of times
+        overflow_count = self.connector._enqueue_log_guard.threshold * 5
+        for _ in range(overflow_count):
+            self.connector.incr('counter')
+        self.assertLess(self.connector.logger.warning.call_count,
+                        overflow_count)
 
 
 class ConnectorOptionTests(ProcessorTestCase):

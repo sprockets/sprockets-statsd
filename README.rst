@@ -115,6 +115,42 @@ Metrics are sent by a ``asyncio.Task`` that is started by ``start_statsd``.  The
 metric data onto a ``asyncio.Queue`` that the task reads from.  Metric data remains on the queue when the task is
 not connected to the server and will be sent in the order received when the task establishes the server connection.
 
+Integration with sprockets.http
+===============================
+If you use `sprockets.http`_ in your application stack, then the Tornado integration will detect it and install the
+initialization and shutdown hooks for you.  The application will *just work* provided that the `$STATSD_HOST`
+and `$STATSD_PREFIX` environment variables are set appropriately.  The following snippet will produce the same result
+as the Tornado example even without setting the prefix:
+
+.. code-block:: python
+
+   class Application(sprockets_statsd.tornado.Application,
+                     sprockets.http.app.Application):
+       def __init__(self, **settings):
+           statsd = settings.setdefault('statsd', {})
+           statsd.setdefault('host', os.environ['STATSD_HOST'])
+           statsd.setdefault('protocol', 'tcp')
+           settings.update({
+               'service': 'my-service',
+               'environment': os.environ.get('ENVIRONMENT', 'development'),
+               'statsd': statsd,
+               'version': getattr(__package__, 'version'),
+           })
+           super().__init__([web.url('/', MyHandler)], **settings)
+
+   if __name__ == '__main__':
+       sprockets.http.run(Application, log_config=...)
+
+Definint the ``service`` and ``environment`` in `settings` as above will result in the prefix being set to::
+
+   applications.{self.settings["service"]}.{self.settings["environment"]}
+
+The recommended usage is to:
+
+#. define ``service``, ``environment``, and ``version`` in the settings
+#. explicitly set the ``host`` and ``protocol`` settings in  ``self.settings["statsd"]``
+
+.. _sprockets.http: https://sprocketshttp.readthedocs.io/en/master/
 .. _statsd: https://github.com/statsd/statsd/
 .. _tornado: https://tornadoweb.org/
 

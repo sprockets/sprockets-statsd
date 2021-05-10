@@ -4,6 +4,47 @@ import socket
 import typing
 
 
+class ThrottleGuard:
+    """Prevent code from executing repeatedly.
+
+    :param threshold: guarding threshold
+
+    This abstraction allows code to execute the first "threshold"
+    times and then only once per "threshold" times afterwards.  Use
+    it to ensure that log statements are continuously written during
+    persistent error conditions.  The goal is to provide regular
+    feedback while limiting the amount of log spam.
+
+    The following snippet will log the first 100 failures and then
+    once every 100 failures thereafter:
+
+    .. code-block:: python
+
+       executions = 0
+       guard = ThrottleGuard(100)
+       for _ in range(1000):
+           if guard.allow_execution():
+               executions += 1
+               logging.info('called %s times instead of %s times',
+                            executions, guard.counter)
+
+    """
+    def __init__(self, threshold: int):
+        self.counter = 0
+        self.threshold = threshold
+
+    def allow_execution(self) -> bool:
+        """Should this execution be allowed?"""
+        self.counter += 1
+        allow = (self.counter < self.threshold
+                 or (self.counter % self.threshold) == 0)
+        return allow
+
+    def reset(self) -> None:
+        """Reset counter after error has resolved."""
+        self.counter = 0
+
+
 class AbstractConnector:
     """StatsD connector that does not send metrics or connect.
 
@@ -137,6 +178,7 @@ class Connector(AbstractConnector):
         self.logger = logging.getLogger(__package__).getChild('Connector')
         self.prefix = f'{prefix}.' if prefix else prefix
         self.processor = Processor(host=host, port=port, **kwargs)
+        self._enqueue_log_guard = ThrottleGuard(100)
         self._processor_task: typing.Optional[asyncio.Task[None]] = None
 
     async def start(self) -> None:
@@ -174,8 +216,10 @@ class Connector(AbstractConnector):
         payload = f'{self.prefix}{path}:{value}|{type_code}'
         try:
             self.processor.enqueue(payload.encode('utf-8'))
+            self._enqueue_log_guard.reset()
         except asyncio.QueueFull:
-            self.logger.warning('statsd queue is full, discarding metric')
+            if self._enqueue_log_guard.allow_execution():
+                self.logger.warning('statsd queue is full, discarding metric')
 
 
 class StatsdProtocol(asyncio.BaseProtocol):
@@ -389,6 +433,7 @@ class Processor:
         self.host = host
         self.port = port
         self._ip_protocol = ip_protocol
+        self._connect_log_guard = ThrottleGuard(100)
         self._reconnect_sleep = reconnect_sleep
         self._wait_timeout = wait_timeout
 
@@ -479,14 +524,21 @@ class Processor:
                 buffered_data = b''
                 if self.protocol is not None:
                     buffered_data = self.protocol.buffered_data
+
                 t, p = await self._create_transport()  # type: ignore[misc]
                 transport, self.protocol = t, p
                 self.protocol.buffered_data = buffered_data
-                self.logger.info('connection established to %s',
-                                 transport.get_extra_info('peername'))
+                self.logger.info(
+                    'connection established to %s after %s attempts',
+                    transport.get_extra_info('peername'),
+                    self._connect_log_guard.counter)
+                self._connect_log_guard.reset()
             except IOError as error:
-                self.logger.warning('connection to %s:%s failed: %s',
-                                    self.host, self.port, error)
+                if self._connect_log_guard.allow_execution():
+                    self.logger.warning(
+                        'connection to %s:%s failed: %s (%s attempts)',
+                        self.host, self.port, error,
+                        self._connect_log_guard.counter)
                 await asyncio.sleep(self._reconnect_sleep)
 
     async def _process_metric(self) -> None:
