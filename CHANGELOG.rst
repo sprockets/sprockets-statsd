@@ -1,3 +1,7 @@
+Next release
+------------
+- Added ``Connector.timer`` method (addresses :issue:`8`)
+
 :tag:`0.1.0 <0.0.1...0.1.0>` (10-May-2021)
 ------------------------------------------
 - Added :envvar:`STATSD_ENABLED` environment variable to disable the Tornado integration

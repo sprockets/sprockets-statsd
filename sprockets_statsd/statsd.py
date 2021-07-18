@@ -1,6 +1,8 @@
 import asyncio
+import contextlib
 import logging
 import socket
+import time
 import typing
 
 
@@ -107,6 +109,20 @@ class AbstractConnector:
 
         """
         self.inject_metric(f'timers.{path}', str(seconds * 1000.0), 'ms')
+
+    @contextlib.contextmanager
+    def timer(self, path):
+        """Send a timer metric using a context manager.
+
+        :param path: timer to append the measured time to
+
+        """
+        start = time.time()
+        try:
+            yield
+        finally:
+            fini = time.time()
+            self.timing(path, max(fini, start) - start)
 
 
 class Connector(AbstractConnector):

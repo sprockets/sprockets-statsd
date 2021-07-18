@@ -286,7 +286,13 @@ class ConnectorTests(ProcessorTestCase):
         recvd_path, _, rest = decoded.partition(':')
         recvd_value, _, recvd_code = rest.partition('|')
         self.assertEqual(path, recvd_path, 'metric path mismatch')
-        self.assertEqual(recvd_value, str(value), 'metric value mismatch')
+        if type_code == 'ms':
+            self.assertAlmostEqual(float(recvd_value),
+                                   value,
+                                   places=3,
+                                   msg='metric value mismatch')
+        else:
+            self.assertEqual(recvd_value, str(value), 'metric value mismatch')
         self.assertEqual(recvd_code, type_code, 'metric type mismatch')
 
     async def test_adjusting_counter(self):
@@ -330,6 +336,30 @@ class ConnectorTests(ProcessorTestCase):
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assert_metrics_equal(self.statsd_server.metrics[0],
                                   'timers.simple.timer', 12340.0, 'ms')
+
+    async def test_timing_context_manager(self):
+        with unittest.mock.patch(
+                'sprockets_statsd.statsd.time.time') as time_function:
+            time_function.side_effect = [10.0, 22.345]
+            with self.connector.timer('some.timer'):
+                pass
+            self.assertEqual(2, time_function.call_count)
+
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assert_metrics_equal(self.statsd_server.metrics[0],
+                                  'timers.some.timer', 12345.0, 'ms')
+
+    async def test_timer_is_monotonic(self):
+        with unittest.mock.patch(
+                'sprockets_statsd.statsd.time.time') as time_function:
+            time_function.side_effect = [10.001, 10.000]
+            with self.connector.timer('some.timer'):
+                pass
+            self.assertEqual(2, time_function.call_count)
+
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assert_metrics_equal(self.statsd_server.metrics[0],
+                                  'timers.some.timer', 0.0, 'ms')
 
     async def test_that_queued_metrics_are_drained(self):
         # The easiest way to test that the internal metrics queue
