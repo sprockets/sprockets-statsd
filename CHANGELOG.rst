@@ -1,6 +1,7 @@
 Next release
 ------------
 - Added ``Connector.timer`` method (addresses :issue:`8`)
+- Implement ``Timer`` abstraction from python-statsd
 
 :tag:`0.1.0 <0.0.1...0.1.0>` (10-May-2021)
 ------------------------------------------

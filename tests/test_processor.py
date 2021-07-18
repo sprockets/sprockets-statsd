@@ -460,3 +460,83 @@ class ConnectorOptionTests(ProcessorTestCase):
         for _ in range(connector.processor.queue.qsize()):
             metric = await connector.processor.queue.get()
             self.assertEqual(metric, b'counters.counter:1|c')
+
+
+class ConnectorTimerTests(ProcessorTestCase):
+    ip_protocol = socket.IPPROTO_TCP
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.connector = statsd.Connector(self.statsd_server.host,
+                                          self.statsd_server.port)
+        await self.connector.start()
+        await self.wait_for(self.statsd_server.client_connected.acquire())
+
+    async def asyncTearDown(self):
+        await self.wait_for(self.connector.stop())
+        await super().asyncTearDown()
+
+    async def test_that_stop_raises_if_not_started(self):
+        timer = self.connector.timer('whatever')
+        with self.assertRaises(RuntimeError):
+            timer.stop()
+
+    async def test_that_start_returns_instance(self):
+        timer = self.connector.timer('whatever')
+        self.assertIs(timer, timer.start())
+
+    async def test_that_stop_returns_instance(self):
+        timer = self.connector.timer('whatever')
+        timer.start()
+        self.assertIs(timer, timer.stop())
+
+    async def test_that_timing_is_sent_by_stop(self):
+        timer = self.connector.timer('whatever')
+        timer.start()
+        self.assertTrue(self.statsd_server.message_received.locked(),
+                        'timing sent to server unexpectedly')
+        timer.stop()
+        await self.wait_for(self.statsd_server.message_received.acquire())
+
+    async def test_that_timing_send_can_be_delayed(self):
+        timer = self.connector.timer('whatever')
+        timer.start()
+        self.assertTrue(self.statsd_server.message_received.locked(),
+                        'timing sent to server unexpectedly')
+        timer.stop(send=False)
+        self.assertTrue(self.statsd_server.message_received.locked(),
+                        'timing sent to server unexpectedly')
+
+        timer.send()
+        await self.wait_for(self.statsd_server.message_received.acquire())
+
+    async def test_that_send_raises_when_already_sent(self):
+        timer = self.connector.timer('whatever')
+        timer.start()
+        timer.stop(send=False)
+        timer.send()
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        with self.assertRaises(RuntimeError):
+            timer.send()
+
+    async def test_that_send_raises_when_not_started(self):
+        timer = self.connector.timer('whatever')
+        with self.assertRaises(RuntimeError):
+            timer.send()
+
+    async def test_that_send_raises_when_not_stopped(self):
+        timer = self.connector.timer('whatever')
+        timer.start()
+        with self.assertRaises(RuntimeError):
+            timer.send()
+
+    async def test_that_timer_can_be_reused(self):
+        timer = self.connector.timer('whatever')
+        with timer:
+            pass
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assertTrue(self.statsd_server.message_received.locked())
+
+        with timer:
+            pass
+        await self.wait_for(self.statsd_server.message_received.acquire())

@@ -1,5 +1,4 @@
 import asyncio
-import contextlib
 import logging
 import socket
 import time
@@ -45,6 +44,80 @@ class ThrottleGuard:
     def reset(self) -> None:
         """Reset counter after error has resolved."""
         self.counter = 0
+
+
+class Timer:
+    """Implement Timer interface from python-statsd.
+
+    Instances of this class are returned from
+    :meth:`.AbstractConnector.timer` to maintain some compatibility
+    with `python-statsd`_.  You should not create instances of this
+    class yourself.
+
+    This implementation follows the careful protocol created by
+    python-statsd in that it raises :exc:`RuntimeError` in the
+    following cases:
+
+    * :meth:`.stop` is called before calling :meth:`.start`
+    * :meth:`.send` is called before calling :meth:`.stop`
+      which requires a prior call to :meth:`.start`
+
+    The call to :meth:`.send` clears the timing values so calling it
+    twice in a row will result in a :exc:`RuntimeError` as well.
+
+    """
+    def __init__(self, connector: 'AbstractConnector', path: str):
+        self._connector = connector
+        self._path = path
+        self._start_time, self._finish_time = None, None
+
+    def start(self) -> 'Timer':
+        """Start the timer and return `self`."""
+        self._start_time = time.time()
+        return self
+
+    def stop(self, send: bool = True) -> 'Timer':
+        """Stop the timer and send the timing.
+
+        :param send: immediately send the recorded timing to the
+            processor
+
+        You can delay sending the timing by setting the `send`
+        parameter to :data:`False`.
+
+        """
+        if self._start_time is None:
+            raise RuntimeError('Timer.stop called before start')
+        self._finish_time = time.time()
+        if send:
+            self.send()
+        return self
+
+    def send(self):
+        """Send the recorded timing to the connector.
+
+        This method will raise a :exc:`RuntimeError` if a timing has
+        not been recorded by calling :meth:`start` and :meth:`stop` in
+        sequence.
+
+        """
+        if self._start_time is None:
+            raise RuntimeError('Timer.send called before start')
+        if self._finish_time is None:
+            raise RuntimeError('Timer.send called before stop')
+
+        self._connector.timing(
+            self._path,
+            max(self._finish_time, self._start_time) - self._start_time)
+        self._start_time, self._finish_time = None, None
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
+        return False
 
 
 class AbstractConnector:
@@ -110,19 +183,13 @@ class AbstractConnector:
         """
         self.inject_metric(f'timers.{path}', str(seconds * 1000.0), 'ms')
 
-    @contextlib.contextmanager
-    def timer(self, path):
+    def timer(self, path) -> Timer:
         """Send a timer metric using a context manager.
 
         :param path: timer to append the measured time to
 
         """
-        start = time.time()
-        try:
-            yield
-        finally:
-            fini = time.time()
-            self.timing(path, max(fini, start) - start)
+        return Timer(self, path)
 
 
 class Connector(AbstractConnector):
