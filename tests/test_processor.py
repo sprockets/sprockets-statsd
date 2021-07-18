@@ -350,7 +350,7 @@ class ConnectorTests(ProcessorTestCase):
                 'sprockets_statsd.statsd.time.time') as time_function:
             time_function.side_effect = [10.0, 22.345]
             with self.connector.timer('some.timer'):
-                pass
+                pass  # exercising context manager
             self.assertEqual(2, time_function.call_count)
 
         await self.wait_for(self.statsd_server.message_received.acquire())
@@ -362,7 +362,7 @@ class ConnectorTests(ProcessorTestCase):
                 'sprockets_statsd.statsd.time.time') as time_function:
             time_function.side_effect = [10.001, 10.000]
             with self.connector.timer('some.timer'):
-                pass
+                pass  # exercising context manager
             self.assertEqual(2, time_function.call_count)
 
         await self.wait_for(self.statsd_server.message_received.acquire())
@@ -541,10 +541,10 @@ class ConnectorTimerTests(ProcessorTestCase):
     async def test_that_timer_can_be_reused(self):
         timer = self.connector.timer('whatever')
         with timer:
-            pass
+            pass  # exercising context manager
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assertTrue(self.statsd_server.message_received.locked())
 
         with timer:
-            pass
+            pass  # exercising context manager
         await self.wait_for(self.statsd_server.message_received.acquire())
