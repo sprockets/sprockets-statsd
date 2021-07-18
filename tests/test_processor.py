@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import logging
 import socket
 import time
@@ -332,6 +333,13 @@ class ConnectorTests(ProcessorTestCase):
 
     async def test_sending_timer(self):
         secs = 12.34
+        self.connector.timing('simple.timer', secs)
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assert_metrics_equal(self.statsd_server.metrics[0],
+                                  'timers.simple.timer', 12340.0, 'ms')
+
+    async def test_sending_timer_using_timedelta(self):
+        secs = datetime.timedelta(seconds=12, milliseconds=340)
         self.connector.timing('simple.timer', secs)
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assert_metrics_equal(self.statsd_server.metrics[0],

@@ -2,6 +2,8 @@ Next release
 ------------
 - Added ``Connector.timer`` method (addresses :issue:`8`)
 - Implement ``Timer`` abstraction from python-statsd
+- ``Connector.timing`` now accepts :class:`datetime.timedelta` instances in addition
+  to :class:`float` instances
 
 :tag:`0.1.0 <0.0.1...0.1.0>` (10-May-2021)
 ------------------------------------------

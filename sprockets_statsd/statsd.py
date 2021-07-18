@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import logging
 import socket
 import time
@@ -174,13 +175,16 @@ class AbstractConnector:
             payload = str(value)
         self.inject_metric(f'gauges.{path}', payload, 'g')
 
-    def timing(self, path: str, seconds: float) -> None:
+    def timing(self, path: str,
+               seconds: typing.Union[float, datetime.timedelta]) -> None:
         """Send a timer metric.
 
         :param path: timer to append a value to
         :param seconds: number of **seconds** to record
 
         """
+        if isinstance(seconds, datetime.timedelta):
+            seconds = seconds.total_seconds()
         self.inject_metric(f'timers.{path}', str(seconds * 1000.0), 'ms')
 
     def timer(self, path) -> Timer:
