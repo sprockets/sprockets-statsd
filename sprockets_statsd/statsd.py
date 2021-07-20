@@ -67,6 +67,9 @@ class Timer:
     twice in a row will result in a :exc:`RuntimeError` as well.
 
     """
+    _start_time: typing.Union[None, float]
+    _finish_time: typing.Union[None, float]
+
     def __init__(self, connector: 'AbstractConnector', path: str):
         self._connector = connector
         self._path = path
@@ -94,7 +97,7 @@ class Timer:
             self.send()
         return self
 
-    def send(self):
+    def send(self) -> None:
         """Send the recorded timing to the connector.
 
         This method will raise a :exc:`RuntimeError` if a timing has
@@ -112,13 +115,14 @@ class Timer:
             max(self._finish_time, self._start_time) - self._start_time)
         self._start_time, self._finish_time = None, None
 
-    def __enter__(self):
+    def __enter__(self) -> 'Timer':
         self.start()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: typing.Union[typing.Type[Exception], None],
+                 exc_val: typing.Union[Exception, None],
+                 exc_tb: typing.Union[typing.Tuple, None]) -> None:
         self.stop()
-        return False
 
 
 class AbstractConnector:
@@ -187,7 +191,7 @@ class AbstractConnector:
             seconds = seconds.total_seconds()
         self.inject_metric(f'timers.{path}', str(seconds * 1000.0), 'ms')
 
-    def timer(self, path) -> Timer:
+    def timer(self, path: str) -> Timer:
         """Send a timer metric using a context manager.
 
         :param path: timer to append the measured time to
@@ -482,7 +486,7 @@ class Processor:
 
     logger: logging.Logger
     protocol: typing.Optional[StatsdProtocol]
-    queue: asyncio.Queue
+    queue: asyncio.Queue[bytes]
     _create_transport: typing.Callable[[], typing.Coroutine[
         typing.Any, typing.Any, typing.Tuple[asyncio.BaseTransport,
                                              StatsdProtocol]]]

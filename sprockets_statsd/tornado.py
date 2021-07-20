@@ -121,7 +121,7 @@ class Application(web.Application):
         except AttributeError:
             pass
 
-    async def start_statsd(self, *_) -> None:
+    async def start_statsd(self, *_: typing.Any) -> None:
         """Start the connector during startup.
 
         Call this method during application startup to enable the statsd
@@ -157,7 +157,7 @@ class Application(web.Application):
 
             await self.statsd_connector.start()
 
-    async def stop_statsd(self, *_) -> None:
+    async def stop_statsd(self, *_: typing.Any) -> None:
         """Stop the connector during shutdown.
 
         If the connector was started, then this method will gracefully
@@ -171,7 +171,7 @@ class Application(web.Application):
 
     def __handle_fatal_error(self,
                              message: str,
-                             exc: typing.Optional[Exception] = None):
+                             exc: typing.Optional[Exception] = None) -> None:
         logger = self.__get_logger()
         if exc is not None:
             logger.exception('%s', message)
@@ -184,7 +184,7 @@ class Application(web.Application):
 
     def __get_logger(self) -> logging.Logger:
         try:
-            return getattr(self, 'logger')
+            return typing.cast(logging.Logger, getattr(self, 'logger'))
         except AttributeError:
             return logging.getLogger(__package__).getChild(
                 'tornado.Application')
@@ -192,7 +192,7 @@ class Application(web.Application):
 
 class RequestHandler(web.RequestHandler):
     """Mix this into your handler to send metrics to a statsd server."""
-    statsd_connector: typing.Optional[statsd.Connector]
+    statsd_connector: typing.Optional[statsd.AbstractConnector]
 
     def initialize(self, **kwargs: typing.Any) -> None:
         super().initialize(**kwargs)
