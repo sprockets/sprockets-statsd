@@ -36,15 +36,29 @@ metric to send and the task consumes the internal queue when it is connected.
 The following convenience methods are available.  You can also call ``inject_metric`` for complete control over
 the payload.
 
-+--------------+--------------------------------------+
-| ``incr``     | Increment a counter metric           |
-+--------------+--------------------------------------+
-| ``decr``     | Decrement a counter metric           |
-+--------------+--------------------------------------+
-| ``gauge``    | Adjust or set a gauge metric         |
-+--------------+--------------------------------------+
-| ``timing``   | Append a duration to a timer metric  |
-+--------------+--------------------------------------+
++--------------+--------------------------------------------------------------+
+| ``incr``     | Increment a counter metric                                   |
++--------------+--------------------------------------------------------------+
+| ``decr``     | Decrement a counter metric                                   |
++--------------+--------------------------------------------------------------+
+| ``gauge``    | Adjust or set a gauge metric                                 |
++--------------+--------------------------------------------------------------+
+| ``timer``    | Append a duration to a timer metric using a context manager  |
++--------------+--------------------------------------------------------------+
+| ``timing``   | Append a duration to a timer metric                          |
++--------------+--------------------------------------------------------------+
+
+If you are a `python-statsd`_ user, then the method names should look very familiar.  That is quite intentional.
+I like the interface and many others do as well.  There is one very very important difference though -- the
+``timing`` method takes the duration as the number of **seconds** as a :class:`float` instead of the number of
+milliseconds.
+
+.. warning::
+
+   If you are accustomed to using `python-statsd`_, be aware that the ``timing`` method expects the number of
+   seconds as a :class:`float` instead of the number of milliseconds.
+
+.. _python-statsd: https://statsd.readthedocs.io/en/latest/
 
 Tornado helpers
 ===============

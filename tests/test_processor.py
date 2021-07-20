@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import logging
 import socket
 import time
@@ -286,7 +287,13 @@ class ConnectorTests(ProcessorTestCase):
         recvd_path, _, rest = decoded.partition(':')
         recvd_value, _, recvd_code = rest.partition('|')
         self.assertEqual(path, recvd_path, 'metric path mismatch')
-        self.assertEqual(recvd_value, str(value), 'metric value mismatch')
+        if type_code == 'ms':
+            self.assertAlmostEqual(float(recvd_value),
+                                   value,
+                                   places=3,
+                                   msg='metric value mismatch')
+        else:
+            self.assertEqual(recvd_value, str(value), 'metric value mismatch')
         self.assertEqual(recvd_code, type_code, 'metric type mismatch')
 
     async def test_adjusting_counter(self):
@@ -330,6 +337,37 @@ class ConnectorTests(ProcessorTestCase):
         await self.wait_for(self.statsd_server.message_received.acquire())
         self.assert_metrics_equal(self.statsd_server.metrics[0],
                                   'timers.simple.timer', 12340.0, 'ms')
+
+    async def test_sending_timer_using_timedelta(self):
+        secs = datetime.timedelta(seconds=12, milliseconds=340)
+        self.connector.timing('simple.timer', secs)
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assert_metrics_equal(self.statsd_server.metrics[0],
+                                  'timers.simple.timer', 12340.0, 'ms')
+
+    async def test_timing_context_manager(self):
+        with unittest.mock.patch(
+                'sprockets_statsd.statsd.time.time') as time_function:
+            time_function.side_effect = [10.0, 22.345]
+            with self.connector.timer('some.timer'):
+                pass  # exercising context manager
+            self.assertEqual(2, time_function.call_count)
+
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assert_metrics_equal(self.statsd_server.metrics[0],
+                                  'timers.some.timer', 12345.0, 'ms')
+
+    async def test_timer_is_monotonic(self):
+        with unittest.mock.patch(
+                'sprockets_statsd.statsd.time.time') as time_function:
+            time_function.side_effect = [10.001, 10.000]
+            with self.connector.timer('some.timer'):
+                pass  # exercising context manager
+            self.assertEqual(2, time_function.call_count)
+
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assert_metrics_equal(self.statsd_server.metrics[0],
+                                  'timers.some.timer', 0.0, 'ms')
 
     async def test_that_queued_metrics_are_drained(self):
         # The easiest way to test that the internal metrics queue
@@ -430,3 +468,83 @@ class ConnectorOptionTests(ProcessorTestCase):
         for _ in range(connector.processor.queue.qsize()):
             metric = await connector.processor.queue.get()
             self.assertEqual(metric, b'counters.counter:1|c')
+
+
+class ConnectorTimerTests(ProcessorTestCase):
+    ip_protocol = socket.IPPROTO_TCP
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.connector = statsd.Connector(self.statsd_server.host,
+                                          self.statsd_server.port)
+        await self.connector.start()
+        await self.wait_for(self.statsd_server.client_connected.acquire())
+
+    async def asyncTearDown(self):
+        await self.wait_for(self.connector.stop())
+        await super().asyncTearDown()
+
+    async def test_that_stop_raises_if_not_started(self):
+        timer = self.connector.timer('whatever')
+        with self.assertRaises(RuntimeError):
+            timer.stop()
+
+    async def test_that_start_returns_instance(self):
+        timer = self.connector.timer('whatever')
+        self.assertIs(timer, timer.start())
+
+    async def test_that_stop_returns_instance(self):
+        timer = self.connector.timer('whatever')
+        timer.start()
+        self.assertIs(timer, timer.stop())
+
+    async def test_that_timing_is_sent_by_stop(self):
+        timer = self.connector.timer('whatever')
+        timer.start()
+        self.assertTrue(self.statsd_server.message_received.locked(),
+                        'timing sent to server unexpectedly')
+        timer.stop()
+        await self.wait_for(self.statsd_server.message_received.acquire())
+
+    async def test_that_timing_send_can_be_delayed(self):
+        timer = self.connector.timer('whatever')
+        timer.start()
+        self.assertTrue(self.statsd_server.message_received.locked(),
+                        'timing sent to server unexpectedly')
+        timer.stop(send=False)
+        self.assertTrue(self.statsd_server.message_received.locked(),
+                        'timing sent to server unexpectedly')
+
+        timer.send()
+        await self.wait_for(self.statsd_server.message_received.acquire())
+
+    async def test_that_send_raises_when_already_sent(self):
+        timer = self.connector.timer('whatever')
+        timer.start()
+        timer.stop(send=False)
+        timer.send()
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        with self.assertRaises(RuntimeError):
+            timer.send()
+
+    async def test_that_send_raises_when_not_started(self):
+        timer = self.connector.timer('whatever')
+        with self.assertRaises(RuntimeError):
+            timer.send()
+
+    async def test_that_send_raises_when_not_stopped(self):
+        timer = self.connector.timer('whatever')
+        timer.start()
+        with self.assertRaises(RuntimeError):
+            timer.send()
+
+    async def test_that_timer_can_be_reused(self):
+        timer = self.connector.timer('whatever')
+        with timer:
+            pass  # exercising context manager
+        await self.wait_for(self.statsd_server.message_received.acquire())
+        self.assertTrue(self.statsd_server.message_received.locked())
+
+        with timer:
+            pass  # exercising context manager
+        await self.wait_for(self.statsd_server.message_received.acquire())

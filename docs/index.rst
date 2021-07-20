@@ -46,6 +46,7 @@ Reference
 
 .. autoclass:: sprockets_statsd.statsd.Connector
    :members:
+   :inherited-members: incr, decr, gauge, timer, timing
 
 Tornado helpers
 ---------------
@@ -61,6 +62,9 @@ Internals
    :members:
 
 .. autoclass:: sprockets_statsd.statsd.Processor
+   :members:
+
+.. autoclass:: sprockets_statsd.statsd.Timer
    :members:
 
 .. autoclass:: sprockets_statsd.statsd.StatsdProtocol
