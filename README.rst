@@ -50,13 +50,13 @@ the payload.
 
 If you are a `python-statsd`_ user, then the method names should look very familiar.  That is quite intentional.
 I like the interface and many others do as well.  There is one very very important difference though -- the
-``timing`` method takes the duration as the number of **seconds** as a :class:`float` instead of the number of
+``timing`` method takes the duration as the number of **seconds** as a ``float`` instead of the number of
 milliseconds.
 
 .. warning::
 
    If you are accustomed to using `python-statsd`_, be aware that the ``timing`` method expects the number of
-   seconds as a :class:`float` instead of the number of milliseconds.
+   seconds as a ``float`` instead of the number of milliseconds.
 
 .. _python-statsd: https://statsd.readthedocs.io/en/latest/
 
