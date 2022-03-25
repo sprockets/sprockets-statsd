@@ -546,6 +546,7 @@ class Processor:
 
     async def run(self) -> None:
         """Maintains the connection and processes metric payloads."""
+        self.logger.info('processor is starting')
         self.running.set()
         self.stopped.clear()
         self.should_terminate = False
