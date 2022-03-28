@@ -305,6 +305,7 @@ class Connector(AbstractConnector):
 
         """
         payload = f'{self.prefix}{path}:{value}|{type_code}'
+        self.logger.debug('injecting metric %s', payload)
         try:
             self.processor.enqueue(payload.encode('utf-8'))
             self._enqueue_log_guard.reset()
