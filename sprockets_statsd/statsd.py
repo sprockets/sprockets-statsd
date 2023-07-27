@@ -636,7 +636,6 @@ class Processor:
         try:
             metric = await asyncio.wait_for(self.queue.get(),
                                             self._wait_timeout)
-            self.logger.debug('received %r from queue', metric)
             self.queue.task_done()
         except asyncio.TimeoutError:
             # we still want to invoke the protocol send in case

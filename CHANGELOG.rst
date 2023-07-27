@@ -1,3 +1,7 @@
+Next
+----
+- Removed debug-level logging of processing metric
+
 :tag:`1.0.0 <0.1.0...1.0.0>` (20-Jul-2021)
 ------------------------------------------
 - Added ``Connector.timer`` method (addresses :issue:`8`)
