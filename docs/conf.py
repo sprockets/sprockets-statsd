@@ -21,7 +21,8 @@ intersphinx_mapping = {
 # https://www.sphinx-doc.org/en/master/usage/extensions/extlinks.html
 extensions.append('sphinx.ext.extlinks')
 extlinks = {
-    'issue': ("https://github.com/sprockets/sprockets-statsd/issues/%s", "#%s"),
+    'issue':
+        ("https://github.com/sprockets/sprockets-statsd/issues/%s", "#%s"),
     'tag': ("https://github.com/sprockets/sprockets-statsd/compare/%s", "%s"),
 }
 
