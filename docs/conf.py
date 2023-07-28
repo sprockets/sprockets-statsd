@@ -3,8 +3,10 @@ import sprockets_statsd
 project = 'sprockets-statsd'
 version = sprockets_statsd.version
 copyright = '2021 AWeber Communications, Inc.'
-html_theme = 'pyramid'
+html_theme = 'python_docs_theme'
 extensions = []
+html_static_path = ['.']
+html_css_files = ['custom.css']
 
 # https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
 extensions.append('sphinx.ext.autodoc')
@@ -19,9 +21,9 @@ intersphinx_mapping = {
 # https://www.sphinx-doc.org/en/master/usage/extensions/extlinks.html
 extensions.append('sphinx.ext.extlinks')
 extlinks = {
-    'issue': ("https://github.com/sprockets/sprockets-statsd/issues/%s", "#"),
+    'issue': ("https://github.com/sprockets/sprockets-statsd/issues/%s", "#%s"),
     'tag': ("https://github.com/sprockets/sprockets-statsd/compare/%s", "%s"),
 }
 
 # https://pypi.org/project/sphinx-autodoc-typehints/
-extensions.append('sphinx_autodoc_typehints')
+# extensions.append('sphinx_autodoc_typehints')
