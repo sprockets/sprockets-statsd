@@ -305,6 +305,7 @@ class Connector(AbstractConnector):
 
         """
         payload = f'{self.prefix}{path}:{value}|{type_code}'
+        self.logger.debug('injecting metric %s', payload)
         try:
             self.processor.enqueue(payload.encode('utf-8'))
             self._enqueue_log_guard.reset()
@@ -546,6 +547,7 @@ class Processor:
 
     async def run(self) -> None:
         """Maintains the connection and processes metric payloads."""
+        self.logger.info('processor is starting')
         self.running.set()
         self.stopped.clear()
         self.should_terminate = False
