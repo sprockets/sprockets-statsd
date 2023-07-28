@@ -496,7 +496,7 @@ class Processor:
                  host: str,
                  port: int = 8125,
                  ip_protocol: int = socket.IPPROTO_TCP,
-                 max_queue_size: int = 1000,
+                 max_queue_size: int = 1000000,
                  reconnect_sleep: float = 1.0,
                  wait_timeout: float = 0.1) -> None:
         super().__init__()
